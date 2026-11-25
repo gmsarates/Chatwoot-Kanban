@@ -5,6 +5,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 
 from app.config import settings
+from app.contas import account_id_atual
 from app.database import get_pool, sync_task_from_chatwoot
 
 logger = logging.getLogger(__name__)
@@ -12,7 +13,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
-def _verify_signature(payload: bytes, header: str | None) -> bool:
+def _verify_signature(
+    payload: bytes, header: str | None, request: Request | None = None
+) -> bool:
+    # Webhook de uma conta cadastrada: a URL já traz conta + chave (conferidas no
+    # middleware), que é o que autentica
+    if request is not None and getattr(request.state, "conta_por_chave", False):
+        return True
     if not settings.chatwoot_webhook_secret:
         return True
     if not header:
@@ -27,7 +34,7 @@ def _verify_signature(payload: bytes, header: str | None) -> bool:
 async def contact_updated(request: Request):
     body = await request.body()
     sig = request.headers.get("x-chatwoot-signature")
-    if not _verify_signature(body, sig):
+    if not _verify_signature(body, sig, request):
         raise HTTPException(status_code=401, detail="invalid signature")
 
     data = await request.json()
@@ -46,12 +53,14 @@ async def contact_updated(request: Request):
     contact_id = contact.get("id")
 
     await pool.execute(
-        """INSERT INTO webhook_events (event_id, contact_id, event_type, payload)
-           VALUES ($1, $2, $3, $4)""",
+        """INSERT INTO webhook_events
+           (event_id, contact_id, event_type, payload, account_id)
+           VALUES ($1, $2, $3, $4, $5)""",
         event_id,
         contact_id,
         data.get("event", "unknown"),
         body.decode(),
+        account_id_atual(),
     )
 
     custom_attrs = contact.get("custom_attributes") or {}
@@ -73,7 +82,7 @@ async def contact_updated(request: Request):
 async def conversation_updated(request: Request):
     body = await request.body()
     sig = request.headers.get("x-chatwoot-signature")
-    if not _verify_signature(body, sig):
+    if not _verify_signature(body, sig, request):
         raise HTTPException(status_code=401, detail="invalid signature")
 
     data = await request.json()
@@ -95,13 +104,14 @@ async def conversation_updated(request: Request):
 
     await pool.execute(
         """INSERT INTO webhook_events
-           (event_id, contact_id, conversation_id, event_type, payload)
-           VALUES ($1, $2, $3, $4, $5)""",
+           (event_id, contact_id, conversation_id, event_type, payload, account_id)
+           VALUES ($1, $2, $3, $4, $5, $6)""",
         event_id,
         contact_id,
         conv_id,
         data.get("event", "unknown"),
         body.decode(),
+        account_id_atual(),
     )
 
     return {"status": "ok", "event_id": event_id}

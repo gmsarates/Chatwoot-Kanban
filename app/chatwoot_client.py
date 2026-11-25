@@ -7,6 +7,7 @@ import time
 import httpx
 
 from app.config import settings
+from app.contas import conta_atual
 
 logger = logging.getLogger(__name__)
 
@@ -18,13 +19,21 @@ _ATTR_CACHE_TTL = 300  # 5 minutos
 class ChatwootClient:
     def __init__(self) -> None:
         self.base_url = settings.chatwoot_base_url.rstrip("/")
-        self.account_id = settings.chatwoot_account_id
-        self._headers = {
-            "api_access_token": settings.chatwoot_bot_token,
+        self._client: httpx.AsyncClient | None = None
+        # Por conta: as definições de atributos mudam de uma agência para outra
+        self._attr_cache: dict[int, tuple[float, list]] = {}
+
+    @property
+    def account_id(self) -> int:
+        """Conta da requisição atual (ver app.contas)."""
+        return conta_atual().account_id
+
+    @property
+    def _headers(self) -> dict[str, str]:
+        return {
+            "api_access_token": conta_atual().token,
             "Content-Type": "application/json",
         }
-        self._client: httpx.AsyncClient | None = None
-        self._attr_cache: tuple[float, list] | None = None
 
     async def init(self) -> None:
         if self._client is None or self._client.is_closed:
@@ -170,12 +179,14 @@ class ChatwootClient:
 
     async def get_custom_attribute_definitions(self) -> list:
         now = time.time()
-        if self._attr_cache and (now - self._attr_cache[0]) < _ATTR_CACHE_TTL:
-            return self._attr_cache[1]
+        account_id = self.account_id
+        cached = self._attr_cache.get(account_id)
+        if cached and (now - cached[0]) < _ATTR_CACHE_TTL:
+            return cached[1]
         url = f"{self._account_path}/custom_attribute_definitions"
         resp = await self._request("GET", url)
         definitions = resp.json()
-        self._attr_cache = (now, definitions)
+        self._attr_cache[account_id] = (now, definitions)
         return definitions
 
     async def update_custom_attributes(

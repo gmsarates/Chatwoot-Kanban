@@ -4,8 +4,10 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # Chatwoot
     chatwoot_base_url: str
-    chatwoot_account_id: int
-    chatwoot_bot_token: str
+    # Conta padrão (instalação de uma conta só). Com várias contas (Turvia), cada
+    # requisição traz a sua e estas podem ficar vazias
+    chatwoot_account_id: int = 0
+    chatwoot_bot_token: str = ""
 
     chatwoot_bot_email: str = "bot@example.com"
     chatwoot_frontend_url: str = ""
@@ -34,6 +36,10 @@ class Settings(BaseSettings):
     # Cloudflare Access (etapa 0, dejado listo para cuando lo conectemos)
     cf_access_team_domain: str = ""
     cf_access_aud: str = ""
+
+    # Segredo compartilhado com o Turvia: assina a chave de cada conta e protege o
+    # cadastro das contas (PUT /contas). Vazio = só a conta padrão
+    kanban_secret: str = ""
 
     env: str = "development"
 

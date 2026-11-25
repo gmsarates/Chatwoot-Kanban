@@ -6,6 +6,7 @@ from datetime import date
 import asyncpg
 
 from app.config import settings
+from app.contas import Conta, account_id_atual
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,14 @@ async def _init_schema() -> None:
 
     CREATE INDEX IF NOT EXISTS idx_webhook_event_id
       ON webhook_events (event_id);
+
+    CREATE TABLE IF NOT EXISTS contas (
+      account_id  INTEGER PRIMARY KEY,
+      token       TEXT NOT NULL,
+      nome        TEXT,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
     """
     async with pool.acquire() as conn:
         await conn.execute(sql)
@@ -144,6 +153,56 @@ async def _migrate_schema(conn) -> None:
         "ALTER TABLE webhook_events ALTER COLUMN conversation_id DROP NOT NULL"
     )
 
+    # Várias contas: cada tarefa, log e evento é de uma conta do Chatwoot. O que já
+    # existia era da conta padrão (instalação de uma conta só)
+    for tabela in ("tareas", "task_audit_log", "webhook_events"):
+        await conn.execute(
+            f"ALTER TABLE {tabela} "
+            "ADD COLUMN IF NOT EXISTS account_id INTEGER NOT NULL DEFAULT 0"
+        )
+        if settings.chatwoot_account_id:
+            await conn.execute(
+                f"UPDATE {tabela} SET account_id = $1 WHERE account_id = 0",
+                settings.chatwoot_account_id,
+            )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_{tabela}_account ON {tabela} (account_id)"
+        )
+
+
+# ---------- Contas (cadastradas pelo Turvia) ----------
+
+
+async def salvar_conta(account_id: int, token: str, nome: str | None) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO contas (account_id, token, nome) VALUES ($1, $2, $3)
+               ON CONFLICT (account_id)
+               DO UPDATE SET token = $2, nome = $3, updated_at = now()""",
+            account_id,
+            token,
+            nome,
+        )
+
+
+async def remover_conta(account_id: int) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM contas WHERE account_id = $1", account_id)
+
+
+async def buscar_conta(account_id: int) -> Conta | None:
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT account_id, token FROM contas WHERE account_id = $1", account_id
+        )
+        return Conta(row["account_id"], row["token"]) if row else None
+
+
+async def listar_contas() -> list[Conta]:
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT account_id, token FROM contas")
+        return [Conta(r["account_id"], r["token"]) for r in rows]
+
 
 async def get_or_create_agent(email: str, nombre: str = "") -> dict:
     async with pool.acquire() as conn:
@@ -178,8 +237,9 @@ async def write_audit_log(
         await conn.execute(
             """INSERT INTO task_audit_log
                (contact_id, conversation_id, actor_agent_id, actor_name,
-                 action, previous_state, new_state, source, chatwoot_call_ok)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)""",
+                 action, previous_state, new_state, source, chatwoot_call_ok,
+                 account_id)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)""",
             contact_id,
             conversation_id,
             actor_agent_id,
@@ -189,6 +249,7 @@ async def write_audit_log(
             json.dumps(new_state) if new_state else None,
             source,
             chatwoot_call_ok,
+            account_id_atual(),
         )
 
 
@@ -203,8 +264,9 @@ async def upsert_task(
     async with pool.acquire() as conn:
         existing = await conn.fetchrow(
             """SELECT id, mensaje, fecha_vencimiento, estado, creado_por, created_at
-               FROM tareas WHERE contact_id = $1""",
+               FROM tareas WHERE contact_id = $1 AND account_id = $2""",
             contact_id,
+            account_id_atual(),
         )
         if existing:
             await conn.execute(
@@ -220,14 +282,16 @@ async def upsert_task(
             return {"id": existing["id"], "action": "updated"}
         result = await conn.fetchrow(
             """INSERT INTO tareas
-               (contact_id, conversation_id, mensaje, fecha_vencimiento, creado_por)
-               VALUES ($1, $2, $3, $4, $5)
+               (contact_id, conversation_id, mensaje, fecha_vencimiento, creado_por,
+                account_id)
+               VALUES ($1, $2, $3, $4, $5, $6)
                RETURNING id""",
             contact_id,
             conversation_id,
             mensaje,
             fecha_vencimiento,
             actor_agent_id,
+            account_id_atual(),
         )
         return {"id": result["id"], "action": "created"}
 
@@ -237,8 +301,9 @@ async def edit_task(task_id: int, *, mensaje: str, fecha_vencimiento: date) -> d
         existing = await conn.fetchrow(
             """SELECT id, contact_id, conversation_id, mensaje,
                       fecha_vencimiento, estado
-               FROM tareas WHERE id = $1""",
+               FROM tareas WHERE id = $1 AND account_id = $2""",
             task_id,
+            account_id_atual(),
         )
         if not existing:
             return {"error": "not_found"}
@@ -256,8 +321,10 @@ async def edit_task(task_id: int, *, mensaje: str, fecha_vencimiento: date) -> d
 async def close_task(task_id: int, *, cerrado_por: int) -> dict:
     async with pool.acquire() as conn:
         existing = await conn.fetchrow(
-            "SELECT id, contact_id, conversation_id, estado FROM tareas WHERE id = $1",
+            """SELECT id, contact_id, conversation_id, estado FROM tareas
+               WHERE id = $1 AND account_id = $2""",
             task_id,
+            account_id_atual(),
         )
         if not existing:
             return {"error": "not_found"}
@@ -280,9 +347,10 @@ async def get_active_task(contact_id: int) -> dict | None:
             """SELECT t.*, a.nombre AS creado_por_nombre
                FROM tareas t
                JOIN agentes a ON a.id = t.creado_por
-               WHERE t.contact_id = $1
+               WHERE t.contact_id = $1 AND t.account_id = $2
                AND t.estado NOT IN ('tarea_cerrada', 'tarea_vencida')""",
             contact_id,
+            account_id_atual(),
         )
         return dict(row) if row else None
 
@@ -295,12 +363,13 @@ async def get_tasks_for_contacts(contact_ids: list[int]) -> dict:
             """SELECT t.*, a.nombre AS creado_por_nombre
                FROM tareas t
                JOIN agentes a ON a.id = t.creado_por
-               WHERE t.contact_id = ANY($1)
+               WHERE t.contact_id = ANY($1) AND t.account_id = $2
                AND (
                  t.estado NOT IN ('tarea_cerrada', 'tarea_vencida')
                  OR t.cerrado_en >= now() - interval '24 hours'
                )""",
             contact_ids,
+            account_id_atual(),
         )
         return {row["contact_id"]: dict(row) for row in rows}
 
@@ -309,7 +378,8 @@ async def get_pending_sync_tasks() -> list[dict]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """SELECT id, contact_id, conversation_id, estado, fecha_vencimiento
-               FROM tareas WHERE sync_pendiente = true"""
+               FROM tareas WHERE sync_pendiente = true AND account_id = $1""",
+            account_id_atual(),
         )
         return [dict(row) for row in rows]
 
@@ -327,14 +397,17 @@ async def cron_tick() -> dict:
         today_rows = await conn.fetch(
             """UPDATE tareas SET estado = 'tarea_hoy', sync_pendiente = true
                WHERE estado = 'tarea_activa' AND fecha_vencimiento <= CURRENT_DATE
-               RETURNING id, contact_id"""
+                 AND account_id = $1
+               RETURNING id, contact_id""",
+            account_id_atual(),
         )
         transitions["hoy"] = len(today_rows)
 
         vencida_rows = await conn.fetch(
             """UPDATE tareas SET estado = 'tarea_vencida', sync_pendiente = true
-               WHERE estado = 'tarea_hoy'
-               RETURNING id, contact_id"""
+               WHERE estado = 'tarea_hoy' AND account_id = $1
+               RETURNING id, contact_id""",
+            account_id_atual(),
         )
         transitions["vencida"] = len(vencida_rows)
 
@@ -379,8 +452,9 @@ async def sync_task_from_chatwoot(
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id, estado FROM tareas WHERE contact_id = $1",
+            "SELECT id, estado FROM tareas WHERE contact_id = $1 AND account_id = $2",
             contact_id,
+            account_id_atual(),
         )
 
         if not mensaje and not fecha_raw:
@@ -420,14 +494,16 @@ async def sync_task_from_chatwoot(
         agent_ = await get_or_create_agent(settings.chatwoot_bot_email)
         result = await conn.fetchrow(
             """INSERT INTO tareas
-               (contact_id, conversation_id, mensaje, fecha_vencimiento, creado_por)
-               VALUES ($1, $2, $3, $4, $5)
+               (contact_id, conversation_id, mensaje, fecha_vencimiento, creado_por,
+                account_id)
+               VALUES ($1, $2, $3, $4, $5, $6)
                RETURNING id""",
             contact_id,
             conversation_id,
             mensaje or "(Sincronizado desde Chatwoot)",
             fecha,
             agent_["id"],
+            account_id_atual(),
         )
         return {"action": "created", "task_id": result["id"]}
 
@@ -461,8 +537,10 @@ async def batch_sync_tasks_from_chatwoot(contacts_data: list[dict]) -> dict:
             return {"updated": 0, "created": 0, "closed": 0}
 
         rows = await conn.fetch(
-            "SELECT id, contact_id, estado FROM tareas WHERE contact_id = ANY($1)",
+            """SELECT id, contact_id, estado FROM tareas
+               WHERE contact_id = ANY($1) AND account_id = $2""",
             contact_ids,
+            account_id_atual(),
         )
         existing_map = {row["contact_id"]: dict(row) for row in rows}
 
@@ -503,6 +581,7 @@ async def batch_sync_tasks_from_chatwoot(contacts_data: list[dict]) -> dict:
                         entry["mensaje"] or "(Sincronizado desde Chatwoot)",
                         entry["fecha"],
                         bot_agent_id,
+                        account_id_atual(),
                     )
                 )
 
@@ -519,8 +598,9 @@ async def batch_sync_tasks_from_chatwoot(contacts_data: list[dict]) -> dict:
         if creates:
             await conn.executemany(
                 """INSERT INTO tareas
-                   (contact_id, conversation_id, mensaje, fecha_vencimiento, creado_por)
-                   VALUES ($1, $2, $3, $4, $5)""",
+                   (contact_id, conversation_id, mensaje, fecha_vencimiento,
+                    creado_por, account_id)
+                   VALUES ($1, $2, $3, $4, $5, $6)""",
                 creates,
             )
         if closes:
@@ -553,8 +633,10 @@ async def get_agent_stats() -> list[dict]:
                    AS successful_closes
                FROM task_audit_log al
                JOIN agentes a ON a.id = al.actor_agent_id
+               WHERE al.account_id = $1
                GROUP BY a.id, a.nombre, a.email
-               ORDER BY tasks_closed DESC"""
+               ORDER BY tasks_closed DESC""",
+            account_id_atual(),
         )
         return [dict(row) for row in rows]
 
@@ -567,8 +649,10 @@ async def get_audit_history(limit: int = 50) -> list[dict]:
                  al.previous_state, al.new_state, al.source,
                  al.chatwoot_call_ok, al.created_at
                FROM task_audit_log al
+               WHERE al.account_id = $2
                ORDER BY al.created_at DESC
                LIMIT $1""",
             limit,
+            account_id_atual(),
         )
         return [dict(row) for row in rows]

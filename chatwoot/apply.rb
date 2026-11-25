@@ -14,6 +14,8 @@
 # Variáveis (todas opcionais; o que não for definido não é alterado):
 #   CW_KANBAN_URL          https://seu-kanban.up.railway.app/kanban
 #   CW_KANBAN_LABEL        texto do item na barra lateral (padrão: Kanban)
+#   CW_KANBAN_APP_TITLE    título do Dashboard App que o Turvia cria em cada conta (padrão: Funil (Kanban));
+#                          o item abre o endereço dele (com ?conta=&chave= da agência) e, sem ele, o CW_KANBAN_URL
 #   CW_INSTALLATION_NAME   título da aba / nome do sistema (ex.: Turvia CRM)
 #   CW_BRAND_NAME          nome da marca (ex.: Turvia)
 #   CW_BRAND_URL           site da marca
@@ -46,12 +48,42 @@ module TurviaChatwootSetup
     value.empty? ? nil : value
   end
 
-  def kanban_script(url, label)
+  def kanban_script(url, label, app_title)
     <<~HTML
       <script id="cw-kanban">
       (function () {
         var KANBAN_URL = #{url.to_json};
         var LABEL = #{label.to_json};
+        var APP_TITLE = #{app_title.to_json};
+        var urls = {};
+        function contaAtual() {
+          var m = location.pathname.match(/\\/app\\/accounts\\/(\\d+)/);
+          return m ? m[1] : null;
+        }
+        function sessao() {
+          var m = document.cookie.match(/(?:^|; )cw_d_session_info=([^;]*)/);
+          if (!m) return null;
+          try { return JSON.parse(decodeURIComponent(m[1])); } catch (e) { return null; }
+        }
+        // Cada agência tem o seu kanban: o endereço (com ?conta=&chave=) está no Dashboard App
+        // que o Turvia cria na conta. Sem ele, vale o CW_KANBAN_URL (conta padrão do kanban).
+        function urlDaConta() {
+          var conta = contaAtual();
+          var s = sessao();
+          if (!conta || !s) return Promise.resolve(KANBAN_URL);
+          if (urls[conta]) return Promise.resolve(urls[conta]);
+          return fetch('/api/v1/accounts/' + conta + '/dashboard_apps', {
+            headers: {
+              'access-token': s['access-token'], 'token-type': s['token-type'] || 'Bearer',
+              client: s.client, expiry: s.expiry, uid: s.uid
+            }
+          }).then(function (r) { return r.ok ? r.json() : []; }).then(function (apps) {
+            var app = (apps || []).filter(function (a) { return a.title === APP_TITLE; })[0];
+            var u = app && app.content && app.content[0] && app.content[0].url;
+            urls[conta] = u || KANBAN_URL;
+            return urls[conta];
+          }).catch(function () { return KANBAN_URL; });
+        }
         var ID = 'cw-kanban-link';
         var overlay = null;
         var ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 7v7"/><path d="M12 7v4"/><path d="M16 7v9"/></svg>';
@@ -76,7 +108,7 @@ module TurviaChatwootSetup
           overlay.style.cssText = 'position:fixed;top:0;right:0;bottom:0;z-index:35;';
           overlay.style.background = aside ? getComputedStyle(aside).backgroundColor : '#fff';
           var frame = document.createElement('iframe');
-          frame.src = KANBAN_URL;
+          urlDaConta().then(function (u) { frame.src = u; });
           frame.style.cssText = 'border:0;width:100%;height:100%;display:block;';
           var close = document.createElement('button');
           close.type = 'button'; close.textContent = '\\u2715'; close.title = 'Fechar kanban';
@@ -109,6 +141,8 @@ module TurviaChatwootSetup
               if (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1) return;
               e.preventDefault(); openOverlay();
             });
+            // Ctrl+clique (nova aba) também abre o kanban da conta
+            a.addEventListener('mouseenter', function () { urlDaConta().then(function (u) { a.href = u; }); });
             li.appendChild(a); ul.appendChild(li);
           }
           var label = a.querySelector('[data-label]');
@@ -169,7 +203,10 @@ module TurviaChatwootSetup
 
     parts = []
     kanban_url = env('CW_KANBAN_URL')
-    parts << kanban_script(kanban_url, env('CW_KANBAN_LABEL') || 'Kanban') if kanban_url
+    if kanban_url
+      parts << kanban_script(kanban_url, env('CW_KANBAN_LABEL') || 'Kanban',
+                             env('CW_KANBAN_APP_TITLE') || 'Funil (Kanban)')
+    end
     favicon = env('CW_FAVICON')
     parts << favicon_script(favicon, env('CW_FAVICON_BADGE') || favicon) if favicon
     return rest if parts.empty?

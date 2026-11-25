@@ -11,6 +11,13 @@ from pydantic import BaseModel
 
 from app.chatwoot_client import chatwoot_client
 from app.config import settings
+from app.contas import (
+    account_id_atual,
+    conta_da_requisicao,
+    conta_padrao,
+    definir_conta,
+    restaurar_conta,
+)
 from app.database import (
     batch_sync_tasks_from_chatwoot,
     close_task,
@@ -21,6 +28,7 @@ from app.database import (
     get_audit_history,
     get_or_create_agent,
     get_tasks_for_contacts,
+    listar_contas,
     upsert_task,
     write_audit_log,
 )
@@ -67,8 +75,12 @@ async def _get_actor(request: Request) -> tuple[int, str, str]:
     return agent["id"], agent["nombre"], agent["email"]
 
 
+def _chave_cache(stage: str | None) -> str:
+    return f"{account_id_atual()}:{stage or '__all__'}"
+
+
 def _get_cached_board(stage: str | None) -> dict | None:
-    key = stage or "__all__"
+    key = _chave_cache(stage)
     entry = _board_cache.get(key)
     if entry and (time_module.time() - entry[0]) < _BOARD_CACHE_TTL:
         return entry[1]
@@ -76,11 +88,13 @@ def _get_cached_board(stage: str | None) -> dict | None:
 
 
 def _set_cached_board(stage: str | None, data: dict) -> None:
-    _board_cache[stage or "__all__"] = (time_module.time(), data)
+    _board_cache[_chave_cache(stage)] = (time_module.time(), data)
 
 
 def _invalidate_board_cache() -> None:
-    _board_cache.clear()
+    prefixo = f"{account_id_atual()}:"
+    for chave in [c for c in _board_cache if c.startswith(prefixo)]:
+        _board_cache.pop(chave, None)
 
 
 async def _bg_sync_task_and_audit(
@@ -98,12 +112,15 @@ async def _bg_sync_task_and_audit(
     chatwoot_ok = True
     try:
         await chatwoot_client.safe_update_contact_custom_attributes(
-            contact_id, attrs, skip_read=True,
+            contact_id,
+            attrs,
+            skip_read=True,
         )
     except Exception as exc:
         logger.error(
             "Background Chatwoot sync failed for contact %s: %s",
-            contact_id, exc,
+            contact_id,
+            exc,
         )
         chatwoot_ok = False
 
@@ -118,20 +135,53 @@ async def _bg_sync_task_and_audit(
     )
 
 
-@router.get("", response_class=HTMLResponse)
-async def kanban_page():
-    html = TEMPLATE_DIR / "kanban.html"
+# Com várias contas, a página é aberta com ?conta=&chave= (URL do Dashboard App da
+# conta). Este script repassa os dois em todo fetch para a própria API e nos links
+# entre o quadro e o dashboard, sem mexer no resto do front.
+_SCRIPT_CONTA = """<script>
+(function () {
+  var p = new URLSearchParams(location.search);
+  var conta = p.get('conta'), chave = p.get('chave');
+  if (!conta) return;
+  var original = window.fetch;
+  window.fetch = function (recurso, opcoes) {
+    var url = typeof recurso === 'string' ? recurso : recurso.url;
+    if (url.charAt(0) === '/' || url.indexOf(location.origin) === 0) {
+      opcoes = Object.assign({}, opcoes);
+      var h = new Headers(opcoes.headers || {});
+      h.set('X-Kanban-Conta', conta);
+      h.set('X-Kanban-Chave', chave);
+      opcoes.headers = h;
+    }
+    return original.call(this, recurso, opcoes);
+  };
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[href^="/kanban"]');
+    if (!a) return;
+    var u = new URL(a.getAttribute('href'), location.origin);
+    u.searchParams.set('conta', conta);
+    u.searchParams.set('chave', chave);
+    a.setAttribute('href', u.pathname + u.search);
+  }, true);
+})();
+</script>"""
+
+
+def _pagina(nome: str) -> HTMLResponse:
+    html = TEMPLATE_DIR / nome
     if not html.exists():
         raise HTTPException(status_code=404, detail="template not found")
-    return HTMLResponse(html.read_text())
+    return HTMLResponse(html.read_text().replace("<head>", "<head>" + _SCRIPT_CONTA, 1))
+
+
+@router.get("", response_class=HTMLResponse)
+async def kanban_page():
+    return _pagina("kanban.html")
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page():
-    html = TEMPLATE_DIR / "dashboard.html"
-    if not html.exists():
-        raise HTTPException(status_code=404, detail="template not found")
-    return HTMLResponse(html.read_text())
+    return _pagina("dashboard.html")
 
 
 @router.patch("/board/{contact_id}/stage")
@@ -356,6 +406,27 @@ async def get_tasks(contact_id: int | None = None):
 
 @router.post("/cron/tick")
 async def kanban_cron_tick(request: Request):
+    # Várias contas e nenhuma na requisição: roda para cada conta cadastrada (e a
+    # padrão, se houver). Instalação de uma conta só: segue como antes
+    if conta_da_requisicao() is None and settings.kanban_secret:
+        contas = await listar_contas()
+        padrao = conta_padrao()
+        if padrao and all(c.account_id != padrao.account_id for c in contas):
+            contas.append(padrao)
+        resultados = {}
+        for conta in contas:
+            token = definir_conta(conta)
+            try:
+                resultados[conta.account_id] = await _cron_da_conta(request)
+            except HTTPException as exc:
+                resultados[conta.account_id] = {"ok": False, "erro": exc.detail}
+            finally:
+                restaurar_conta(token)
+        return {"ok": True, "contas": resultados}
+    return await _cron_da_conta(request)
+
+
+async def _cron_da_conta(request: Request):
     actor_id, actor_name, _ = await _get_actor(request)
     try:
         result = await cron_tick()
@@ -498,9 +569,7 @@ async def kanban_board(stage: str | None = None):
                 all_cards.extend(cards)
                 meta = _extract_meta(resp)
                 count = meta.get("count", 0)
-                total_pages = (
-                    max(1, math.ceil(count / _PAGE_SIZE)) if count else 1
-                )
+                total_pages = max(1, math.ceil(count / _PAGE_SIZE)) if count else 1
                 if page >= total_pages:
                     break
                 page += 1

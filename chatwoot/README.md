@@ -19,6 +19,7 @@ Defina só as que quiser mudar. As que você não definir continuam como estão.
 |---|---|---|
 | `CW_KANBAN_URL` | `https://meu-kanban.up.railway.app/kanban` | item Kanban na barra lateral |
 | `CW_KANBAN_LABEL` | `Kanban` | texto do item (padrão: Kanban) |
+| `CW_KANBAN_APP_TITLE` | `Funil (Kanban)` | título do Dashboard App que o Turvia cria em cada conta (padrão: Funil (Kanban)) |
 | `CW_INSTALLATION_NAME` | `Turvia CRM` | título da aba / nome do sistema |
 | `CW_BRAND_NAME` | `Turvia` | nome da marca |
 | `CW_BRAND_URL` | `https://turvia.com.br` | site da marca |
@@ -49,6 +50,12 @@ Para tirar o item do Kanban e o favicon (título e logos continuam como estão):
 ```bash
 cd /app && CW_UNINSTALL=1 bundle exec rails runner 'require "open-uri"; eval(URI.open("https://raw.githubusercontent.com/gmsarates/Chatwoot-Kanban/main/chatwoot/apply.rb").read)'
 ```
+
+## Várias contas (agências do Turvia)
+
+O item da barra lateral descobre a conta aberta (`/app/accounts/<id>`) e abre o endereço do Dashboard App
+"Funil (Kanban)" dessa conta, que o Turvia cria com `?conta=&chave=` da agência. Na conta que não tem esse app
+(ex.: a sua, de prospecção), abre o `CW_KANBAN_URL`, que usa a conta padrão do kanban (`CHATWOOT_ACCOUNT_ID`).
 
 ## Observações
 

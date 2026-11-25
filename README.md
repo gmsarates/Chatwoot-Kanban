@@ -159,6 +159,22 @@ To enable daily stage transitions, call the cron endpoint daily (e.g., via exter
 curl -X POST https://your-domain/kanban/cron/tick
 ```
 
+## Várias contas (Turvia)
+
+Com `KANBAN_SECRET` configurado, o mesmo Kanban atende várias contas do Chatwoot (uma
+por agência do Turvia), cada uma com os próprios dados:
+
+- O Turvia cadastra a conta em `PUT /contas/{account_id}` (cabeçalho
+  `X-Kanban-Segredo: <KANBAN_SECRET>`, corpo `{"token": "...", "nome": "..."}`) e recebe a
+  `chave` da conta (HMAC do id com o segredo).
+- O Dashboard App da conta aponta para `/kanban?conta=<id>&chave=<chave>`; a página
+  repassa os dois em toda chamada (`X-Kanban-Conta`/`X-Kanban-Chave`). Trocar o número da
+  conta na URL não abre a de outra agência.
+- Os webhooks da conta usam a mesma `?conta=&chave=` na URL.
+- `POST /kanban/cron/tick` sem conta roda para todas as contas cadastradas.
+- Tarefas, histórico e eventos ganharam a coluna `account_id` (o que já existia fica com
+  `CHATWOOT_ACCOUNT_ID`). Sem `conta` na requisição vale a conta padrão das variáveis.
+
 ## Architecture
 
 | Layer    | Technology                          |
