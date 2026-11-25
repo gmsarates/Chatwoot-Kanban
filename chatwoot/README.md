@@ -11,6 +11,9 @@ Você pode rodar o script quantas vezes quiser: ele substitui o que aplicou ante
 
 ## Como aplicar (instalação nova ou mudança)
 
+Ordem num deploy novo: Chatwoot no ar → Kanban no ar (para ter o `CW_KANBAN_URL`) → este script. O roteiro completo
+do CRM está no repositório do Turvia, em `infra/README.md`, seção 8.
+
 ### 1. Variáveis no serviço **web** do Chatwoot (Railway → Variables)
 
 Defina só as que quiser mudar. As que você não definir continuam como estão.
@@ -28,6 +31,7 @@ Defina só as que quiser mudar. As que você não definir continuam como estão.
 | `CW_LOGO_THUMBNAIL` | `https://.../icone.png` | ícone quadrado do canto do menu |
 | `CW_FAVICON` | `https://.../favicon.png` | ícone da aba (PNG quadrado) |
 | `CW_FAVICON_BADGE` | `https://.../favicon-badge.png` | ícone da aba com notificação (padrão: igual ao `CW_FAVICON`) |
+| `CW_WEBHOOK_TIMEOUT` | `60` | segundos que o Chatwoot espera a Evolution responder (padrão: **60**, aplicado sempre). Com o padrão do Chatwoot (5s), anexos chegam ao destinatário mas aparecem como falha (`Net::ReadTimeout`) |
 
 As imagens precisam estar em um endereço público.
 
@@ -60,6 +64,8 @@ O item da barra lateral descobre a conta aberta (`/app/accounts/<id>`) e abre o 
 ## Observações
 
 - O console precisa ser o do serviço **web** do Chatwoot (o que tem a pasta `/app`), não o do Postgres, Redis ou Sidekiq.
-- Use a imagem **Community Edition** do Chatwoot (tag terminada em `-ce`).
+- Use a imagem **Community Edition** do Chatwoot (tag terminada em `-ce`) com a versão fixada. O item da barra
+  lateral procura elementos do HTML do Chatwoot: depois de atualizar o Chatwoot, confira se o item continua
+  aparecendo e, se sumiu, ajuste o seletor no `apply.rb` e rode o script de novo.
 - Alguns textos internos do Chatwoot (certas mensagens do sistema e e-mails) continuam dizendo "Chatwoot"; tirar todos exige fork ou a edição paga.
 - Se você já tinha colado à mão o script do kanban ou do favicon no `DASHBOARD_SCRIPTS`, o `apply.rb` substitui essas versões; outros scripts que estejam lá são mantidos.

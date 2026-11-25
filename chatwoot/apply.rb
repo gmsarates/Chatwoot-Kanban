@@ -24,6 +24,9 @@
 #   CW_LOGO_THUMBNAIL      ícone quadrado (canto do menu)
 #   CW_FAVICON             ícone da aba (PNG quadrado)
 #   CW_FAVICON_BADGE       ícone da aba com notificação (padrão: igual ao CW_FAVICON)
+#   CW_WEBHOOK_TIMEOUT     segundos que o Chatwoot espera a resposta dos webhooks (padrão: 60). A Evolution só
+#                          responde depois de enviar o anexo ao WhatsApp; com o padrão do Chatwoot (5s) vídeos e
+#                          imagens chegam ao destinatário mas ficam marcados como falha (Net::ReadTimeout)
 #   CW_UNINSTALL=1         remove os scripts (kanban + favicon) aplicados por este arquivo
 
 require 'json'
@@ -40,6 +43,8 @@ module TurviaChatwootSetup
     'CW_LOGO_DARK' => 'LOGO_DARK',
     'CW_LOGO_THUMBNAIL' => 'LOGO_THUMBNAIL'
   }.freeze
+
+  DEFAULT_WEBHOOK_TIMEOUT = 60
 
   module_function
 
@@ -224,6 +229,20 @@ module TurviaChatwootSetup
     :changed
   end
 
+  # Tempo que o Chatwoot espera a Evolution responder um webhook (lib/webhooks/trigger.rb:
+  # GlobalConfig WEBHOOK_TIMEOUT, padrão 5s). Aplicado sempre, com padrão de 60s.
+  def apply_webhook_timeout
+    raw = env('CW_WEBHOOK_TIMEOUT')
+    seconds = raw ? Integer(raw, exception: false) : DEFAULT_WEBHOOK_TIMEOUT
+    unless seconds&.positive?
+      puts "  WEBHOOK_TIMEOUT: valor inválido em CW_WEBHOOK_TIMEOUT (#{raw.inspect}), mantido"
+      return
+    end
+    current = InstallationConfig.find_by(name: 'WEBHOOK_TIMEOUT')&.value
+    status = current.to_s == seconds.to_s ? :unchanged : set_config('WEBHOOK_TIMEOUT', seconds)
+    puts "  WEBHOOK_TIMEOUT: #{seconds}s (#{status == :changed ? 'atualizado' : 'já estava certo'})"
+  end
+
   def run
     puts '== Personalizações do Chatwoot (Turvia) =='
 
@@ -233,6 +252,8 @@ module TurviaChatwootSetup
 
       puts "  #{config_name}: #{set_config(config_name, value) == :changed ? 'atualizado' : 'já estava certo'}"
     end
+
+    apply_webhook_timeout
 
     current = InstallationConfig.find_by(name: 'DASHBOARD_SCRIPTS')&.value
     scripts = build_dashboard_scripts(current)

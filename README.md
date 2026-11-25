@@ -175,6 +175,38 @@ por agência do Turvia), cada uma com os próprios dados:
 - Tarefas, histórico e eventos ganharam a coluna `account_id` (o que já existia fica com
   `CHATWOOT_ACCOUNT_ID`). Sem `conta` na requisição vale a conta padrão das variáveis.
 
+### Deploy no Railway (Turvia)
+
+O roteiro completo do CRM (Chatwoot, Evolution, relay e Turvia) está no repositório do Turvia, em
+`infra/README.md`, seção 8. Para este serviço:
+
+1. Novo serviço a partir deste repositório (o Railway usa o `Dockerfile`) e um **Postgres próprio**. As tabelas
+   (inclusive `contas` e as colunas `account_id`) são criadas ao subir.
+2. Variáveis:
+
+   | Variável | Valor |
+   |---|---|
+   | `CHATWOOT_BASE_URL` | Chatwoot visto pelo Kanban (a rede privada serve: `http://<web>.railway.internal:<porta>`) |
+   | `CHATWOOT_FRONTEND_URL` | endereço público do Chatwoot (links para os contatos) |
+   | `DATABASE_URL` | Postgres do Kanban |
+   | `KANBAN_SECRET` | `openssl rand -hex 32`, o mesmo valor no Turvia |
+   | `PORT` | `8000` |
+   | `CHATWOOT_ACCOUNT_ID` / `CHATWOOT_BOT_TOKEN` | **só** se quiser o Kanban numa conta sua fora do Turvia (veja o alerta abaixo) |
+
+3. Gere o domínio público. No Turvia, `KANBAN_URL` é **a raiz** desse domínio (sem `/kanban`).
+4. O cron das tarefas (`POST /kanban/cron/tick`) é chamado pelo `sistur-worker` de hora em hora (tarefa
+   `kanban-tick`, com `KANBAN_URL` nas variáveis do worker). Sem ele, as tarefas não passam para "hoje"/"vencida".
+5. Depois, rode o `chatwoot/apply.rb` no Chatwoot (item Kanban na barra lateral): `chatwoot/README.md`.
+
+Se o endereço, o `KANBAN_SECRET` ou o banco deste serviço mudarem, as contas já instaladas precisam ser
+reinstaladas pelo Turvia (`infra/README.md` do Turvia, seção 8.7).
+
+> **Segurança: conta padrão.** Requisições sem `conta`/`chave` usam a conta padrão (`CHATWOOT_ACCOUNT_ID` +
+> `CHATWOOT_BOT_TOKEN`) **sem nenhuma autenticação** (o projeto original contava com Cloudflare Access na frente).
+> Com a conta padrão configurada e o domínio público, qualquer pessoa que souber o endereço vê o quadro, os contatos
+> e as rotas `/debug` dessa conta. Sem conta padrão, essas requisições respondem 401. As contas do Turvia não são
+> afetadas: elas sempre exigem a `chave`.
+
 ## Architecture
 
 | Layer    | Technology                          |

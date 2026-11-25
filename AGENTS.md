@@ -3,6 +3,14 @@
 Integración Kanban/Tareas para Chatwoot CRM. Plugin desplegado como API
 FastAPI, sin frontend propio; la UI será vía iframe embebido en Chatwoot.
 
+## Fork do Turvia (leia primeiro)
+
+Este fork atende **várias contas do Chatwoot** (uma por agência do Turvia): `app/contas.py`, `app/routers/contas.py`,
+coluna `account_id` nas tabelas e o middleware `selecionar_conta` em `app/main.py` (seção "Várias contas" do
+`README.md`). O deploy deste fork é no **Railway** (README, "Deploy no Railway (Turvia)"), não no Arcane descrito
+abaixo, e o script `chatwoot/apply.rb` personaliza o Chatwoot (item Kanban na barra lateral, marca, favicon).
+Documentação nova deste fork em português; o restante é do projeto original, em espanhol.
+
 ## Stack
 
 | Capa       | Tecnología                        |
