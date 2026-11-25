@@ -390,3 +390,40 @@ def test_search_contacts_chatwoot_error(client):
         mock_client.search_contacts = AsyncMock(side_effect=Exception("boom"))
         response = client.get("/kanban/contacts/search?q=x")
     assert response.status_code == 502
+
+
+def test_remove_from_board_ok(client):
+    with (
+        patch("app.routers.kanban.chatwoot_client") as mock_client,
+        patch("app.routers.kanban.get_or_create_agent") as mock_agent,
+        patch(
+            "app.routers.kanban.write_audit_log", new_callable=AsyncMock
+        ) as mock_audit,
+    ):
+        mock_agent.return_value = {"id": 1, "nombre": "Bot", "email": "bot@x"}
+        mock_client.remove_contact_custom_attributes = AsyncMock(return_value={})
+        response = client.delete("/kanban/board/101/stage")
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    mock_client.remove_contact_custom_attributes.assert_awaited_once_with(
+        101, ["pipeline_01_etapas"]
+    )
+    assert mock_audit.await_args.kwargs["action"] == "board_remove"
+    assert mock_audit.await_args.kwargs["chatwoot_call_ok"] is True
+
+
+def test_remove_from_board_chatwoot_error(client):
+    with (
+        patch("app.routers.kanban.chatwoot_client") as mock_client,
+        patch("app.routers.kanban.get_or_create_agent") as mock_agent,
+        patch(
+            "app.routers.kanban.write_audit_log", new_callable=AsyncMock
+        ) as mock_audit,
+    ):
+        mock_agent.return_value = {"id": 1, "nombre": "Bot", "email": "bot@x"}
+        mock_client.remove_contact_custom_attributes = AsyncMock(
+            side_effect=Exception("boom")
+        )
+        response = client.delete("/kanban/board/101/stage")
+    assert response.status_code == 502
+    assert mock_audit.await_args.kwargs["chatwoot_call_ok"] is False

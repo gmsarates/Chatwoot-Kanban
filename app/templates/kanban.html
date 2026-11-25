@@ -319,6 +319,19 @@ body {
   font-size: 13px;
 }
 
+.link-remove {
+  display: block;
+  margin-top: 2px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: rgb(var(--red));
+  font-size: 12px;
+  cursor: pointer;
+}
+.link-remove:hover { text-decoration: underline; }
+.link-remove:disabled { opacity: 0.6; cursor: default; }
+
 /* ── Adicionar contato ─────────────────────────────── */
 .col-add {
   margin-left: auto;
@@ -827,7 +840,8 @@ function openTaskModal(cardData) {
             <div class="card-avatar">${cardData.thumbnail ? `<img src="${cardData.thumbnail}" alt="">` : initials(cardData.contact_name)}</div>
             <div>
               <div class="card-name">${escapeHtml(cardData.contact_name)}</div>
-              <a href="${chatwootLink}" target="_blank" rel="noopener">Abrir no Chatwoot</a>
+              <a href="${chatwootLink}" target="_blank" rel="noopener">Ver contato</a>
+              <button type="button" class="link-remove" id="modal-remove-contact">Remover do kanban</button>
             </div>
           </div>
           <div style="margin-bottom:12px">
@@ -847,12 +861,45 @@ function openTaskModal(cardData) {
   });
   document.getElementById('modal-close-x').addEventListener('click', closeTaskModal);
   document.getElementById('modal-cancel')?.addEventListener('click', closeTaskModal);
+  document.getElementById('modal-remove-contact')
+    .addEventListener('click', (e) => removeFromBoard(cardData, e.currentTarget));
 
   if (task && computedEstado && computedEstado !== 'tarea_cerrada') {
     document.getElementById('modal-save')?.addEventListener('click', () => saveTask(task.id));
     document.getElementById('modal-close-task')?.addEventListener('click', () => closeTaskAction(task.id));
   } else if (!task) {
     document.getElementById('modal-create')?.addEventListener('click', () => createTask(cardData.id));
+  }
+}
+
+// ── Remover do kanban ────────────────────────────────
+async function removeFromBoard(cardData, btn) {
+  // Primeiro clique pede confirmação; o segundo remove.
+  if (btn.dataset.confirm !== '1') {
+    btn.dataset.confirm = '1';
+    btn.textContent = 'Clique de novo para confirmar';
+    setTimeout(() => {
+      if (btn.isConnected && btn.dataset.confirm === '1') {
+        btn.dataset.confirm = '';
+        btn.textContent = 'Remover do kanban';
+      }
+    }, 4000);
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Removendo…';
+  try {
+    const res = await fetch(`${API_MOVE_STAGE}/${cardData.id}/stage`, { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+    document.querySelector(`.card[data-contact-id="${cardData.id}"]`)?.remove();
+    updateCounts();
+    closeTaskModal();
+    showToast(`${cardData.contact_name || 'Contato'} removido do kanban`, 'success');
+  } catch (err) {
+    btn.disabled = false;
+    btn.dataset.confirm = '';
+    btn.textContent = 'Remover do kanban';
+    showToast(`Erro ao remover: ${err.message}`, 'error');
   }
 }
 

@@ -160,6 +160,14 @@ class ChatwootClient:
         merged = {**existing, **attributes}
         return await self.update_contact_custom_attributes(contact_id, merged)
 
+    async def remove_contact_custom_attributes(
+        self, contact_id: int, keys: list
+    ) -> dict:
+        """Apaga atributos personalizados do contato (não só deixa vazio)."""
+        url = f"{self._account_path}/contacts/{contact_id}/destroy_custom_attributes"
+        resp = await self._request("POST", url, json={"custom_attributes": keys})
+        return resp.json() if resp.content else {}
+
     async def get_custom_attribute_definitions(self) -> list:
         now = time.time()
         if self._attr_cache and (now - self._attr_cache[0]) < _ATTR_CACHE_TTL:

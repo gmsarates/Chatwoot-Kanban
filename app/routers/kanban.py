@@ -188,6 +188,46 @@ async def move_stage(contact_id: int, body: MoveStageRequest, request: Request):
         ) from exc
 
 
+@router.delete("/board/{contact_id}/stage")
+async def remove_from_board(contact_id: int, request: Request):
+    """Tira o contato do kanban apagando o atributo de etapa no Chatwoot.
+
+    O contato e as conversas continuam no Chatwoot; só deixa de aparecer no quadro.
+    """
+    actor_id, actor_name, _ = await _get_actor(request)
+    try:
+        await chatwoot_client.remove_contact_custom_attributes(
+            contact_id, [PIPELINE_ATTR_KEY]
+        )
+    except Exception as exc:
+        logger.error("Failed to remove contact %s from board: %s", contact_id, exc)
+        await _audit_board_remove(contact_id, actor_id, actor_name, ok=False)
+        raise HTTPException(
+            status_code=502, detail=f"Erro na API do Chatwoot: {exc}"
+        ) from exc
+
+    _invalidate_board_cache()
+    await _audit_board_remove(contact_id, actor_id, actor_name, ok=True)
+    return {"ok": True}
+
+
+async def _audit_board_remove(
+    contact_id: int, actor_id: int, actor_name: str, *, ok: bool
+) -> None:
+    try:
+        await write_audit_log(
+            contact_id=contact_id,
+            actor_agent_id=actor_id,
+            actor_name=actor_name,
+            action="board_remove",
+            previous_state=None,
+            new_state={"stage_to": None},
+            chatwoot_call_ok=ok,
+        )
+    except Exception as exc:  # o log de auditoria não pode quebrar a remoção
+        logger.warning("Audit log failed for board_remove %s: %s", contact_id, exc)
+
+
 @router.post("/tasks")
 async def create_task(
     body: CreateTaskRequest, request: Request, background_tasks: BackgroundTasks

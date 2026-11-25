@@ -203,6 +203,7 @@ function actionBadge(action) {
     cron_tick: { label: 'Cron', cls: 'badge-cron' },
     cron_transition: { label: 'Cron', cls: 'badge-cron' },
     stage_change: { label: 'Movida', cls: 'badge-stage' },
+    board_remove: { label: 'Removida do kanban', cls: 'badge-overwrite' },
   };
   const m = map[action] || { label: action, cls: 'badge-cron' };
   return `<span class="badge ${m.cls}">${m.label}</span>`;
