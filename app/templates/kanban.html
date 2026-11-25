@@ -332,6 +332,9 @@ body {
 .link-remove:hover { text-decoration: underline; }
 .link-remove:disabled { opacity: 0.6; cursor: default; }
 
+.card-task.done { opacity: 0.6; }
+.card-task.done .card-task-msg { text-decoration: line-through; }
+
 /* ── Adicionar contato ─────────────────────────────── */
 .col-add {
   margin-left: auto;
@@ -624,7 +627,7 @@ const MAX_POLL = 60000;
 
 document.addEventListener('visibilitychange', () => {
   isTabVisible = !document.hidden;
-  if (isTabVisible) refreshBoard();
+  if (isTabVisible) refreshBoard({ silent: true });
 });
 
 const $ = (s, p) => (p || document).querySelector(s);
@@ -681,14 +684,15 @@ function renderTaskBadge(task) {
   const estado = computeTaskEstado(task);
   if (!estado) return '';
   const isOverdue = estado === 'tarea_vencida';
-  const cls = isOverdue ? 'card-task overdue' : 'card-task';
+  const isDone = estado === 'tarea_cerrada';
+  const cls = 'card-task' + (isOverdue ? ' overdue' : '') + (isDone ? ' done' : '');
   const dateStr = task.fecha_vencimiento
     ? new Date(task.fecha_vencimiento).toLocaleDateString('pt-BR')
     : '';
   const msg = task.mensaje ? escapeHtml(task.mensaje) : '';
   return `
     <div class="${cls}" title="${msg}">
-      <span class="card-task-icon">&#128197;</span>
+      <span class="card-task-icon">${isDone ? '&#9989;' : '&#128197;'}</span>
       ${dateStr ? `<span class="card-task-date">${dateStr}</span>` : ''}
       ${msg ? `<div class="card-task-msg">${msg}</div>` : ''}
     </div>
@@ -895,6 +899,7 @@ async function removeFromBoard(cardData, btn) {
     updateCounts();
     closeTaskModal();
     showToast(`${cardData.contact_name || 'Contato'} removido do kanban`, 'success');
+    refreshBoard({ silent: true });
   } catch (err) {
     btn.disabled = false;
     btn.dataset.confirm = '';
@@ -1009,7 +1014,7 @@ async function addContactToStage(contact, name, btn) {
     contact.stage = stage;
     btn.textContent = '✓';
     showToast(`${name} adicionado a ${stage}`, 'success');
-    refreshBoard();
+    refreshBoard({ silent: true });
   } catch (err) {
     btn.disabled = false;
     btn.textContent = contact.stage ? 'Mover' : 'Adicionar';
@@ -1038,6 +1043,39 @@ function optimisticTaskUpdate(contactId, taskData) {
   }
 }
 
+// Depois de uma ação no modal: recarrega o quadro e redesenha o modal com os
+// dados atualizados do card (fonte: servidor), sem fechar a janela.
+function cardDataFromEl(el, contactId) {
+  return {
+    id: contactId,
+    contact_name: el.querySelector('.card-name')?.textContent || '',
+    thumbnail: el.querySelector('.card-avatar img')?.getAttribute('src') || '',
+    task: el.dataset.task ? JSON.parse(el.dataset.task) : null,
+  };
+}
+
+async function refreshAndReopen(contactId, fallbackTask) {
+  const before = document.querySelector(`.card[data-contact-id="${contactId}"]`);
+  const fallback = before
+    ? { ...cardDataFromEl(before, contactId), task: fallbackTask }
+    : null;
+  await refreshBoard({ silent: true });
+  if (currentModalCardId !== contactId) return; // o usuário fechou o modal
+  const el = document.querySelector(`.card[data-contact-id="${contactId}"]`);
+  if (el) openTaskModal(cardDataFromEl(el, contactId));
+  else if (fallback) openTaskModal(fallback);
+}
+
+function setModalBusy(btn, label) {
+  $$('.modal-footer button').forEach(b => { b.disabled = true; });
+  if (btn) btn.textContent = label;
+}
+
+function unsetModalBusy(btn, label) {
+  $$('.modal-footer button').forEach(b => { b.disabled = false; });
+  if (btn) btn.textContent = label;
+}
+
 async function createTask(contactId) {
   const msg = document.getElementById('task-msg')?.value?.trim();
   const date = document.getElementById('task-date')?.value;
@@ -1045,16 +1083,7 @@ async function createTask(contactId) {
   if (!date) { showToast('Selecione uma data de vencimento', 'error'); return; }
 
   const btn = document.getElementById('modal-create');
-  if (btn) { btn.disabled = true; btn.textContent = 'Criando…'; }
-
-  optimisticTaskUpdate(contactId, {
-    id: null,
-    estado: 'tarea_activa',
-    mensaje: msg,
-    fecha_vencimiento: date,
-    creado_por: '',
-  });
-  closeTaskModal();
+  setModalBusy(btn, 'Criando…');
 
   try {
     const res = await fetch(API_TASKS, {
@@ -1064,10 +1093,19 @@ async function createTask(contactId) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    const task = {
+      id: data.task_id,
+      estado: 'tarea_activa',
+      mensaje: msg,
+      fecha_vencimiento: date,
+      creado_por: '',
+    };
+    optimisticTaskUpdate(contactId, task);
     showToast(data.action === 'updated' ? 'Tarefa atualizada' : 'Tarefa criada');
+    await refreshAndReopen(contactId, task);
   } catch (err) {
+    unsetModalBusy(btn, 'Criar tarefa');
     showToast(`Erro: ${err.message}`, 'error');
-    refreshBoard();
   }
 }
 
@@ -1078,16 +1116,8 @@ async function saveTask(taskId) {
   if (!date) { showToast('Selecione uma data de vencimento', 'error'); return; }
 
   const btn = document.getElementById('modal-save');
-  if (btn) { btn.disabled = true; btn.textContent = 'Salvando…'; }
-
-  optimisticTaskUpdate(currentModalCardId, {
-    id: taskId,
-    estado: 'tarea_activa',
-    mensaje: msg,
-    fecha_vencimiento: date,
-    creado_por: '',
-  });
-  closeTaskModal();
+  const contactId = currentModalCardId;
+  setModalBusy(btn, 'Salvando…');
 
   try {
     const res = await fetch(`${API_TASKS}/${taskId}`, {
@@ -1097,28 +1127,40 @@ async function saveTask(taskId) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    const task = {
+      id: taskId,
+      estado: 'tarea_activa',
+      mensaje: msg,
+      fecha_vencimiento: date,
+      creado_por: '',
+    };
+    optimisticTaskUpdate(contactId, task);
     showToast('Tarefa atualizada');
+    await refreshAndReopen(contactId, task);
   } catch (err) {
+    unsetModalBusy(btn, 'Salvar');
     showToast(`Erro: ${err.message}`, 'error');
-    refreshBoard();
   }
 }
 
 async function closeTaskAction(taskId) {
   const btn = document.getElementById('modal-close-task');
-  if (btn) { btn.disabled = true; btn.textContent = 'Concluindo…'; }
-
-  optimisticTaskUpdate(currentModalCardId, null);
-  closeTaskModal();
+  const contactId = currentModalCardId;
+  const card = document.querySelector(`.card[data-contact-id="${contactId}"]`);
+  const prev = card?.dataset.task ? JSON.parse(card.dataset.task) : {};
+  setModalBusy(btn, 'Concluindo…');
 
   try {
     const res = await fetch(`${API_TASKS}/${taskId}/close`, { method: 'PATCH' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    const task = { ...prev, id: taskId, estado: 'tarea_cerrada', cerrado_en: new Date().toISOString() };
+    optimisticTaskUpdate(contactId, task);
     showToast('Tarefa concluída');
+    await refreshAndReopen(contactId, task);
   } catch (err) {
+    unsetModalBusy(btn, 'Concluir tarefa');
     showToast(`Erro: ${err.message}`, 'error');
-    refreshBoard();
   }
 }
 
@@ -1172,19 +1214,34 @@ function renderBoard(data) {
   renderColumns(columns, board);
 }
 
-async function refreshBoard() {
+async function refreshBoard({ silent = false } = {}) {
   const stage = document.getElementById('pipeline-select')?.value;
   const taskFilter = document.getElementById('state-filter')?.value;
   activeFilter = taskFilter;
 
   const board = document.getElementById('board');
-  board.innerHTML = `<div class="loading" style="min-height:200px"><div class="spinner"></div>Carregando…</div>`;
+  if (!board) return;
+  if (!silent) {
+    board.innerHTML = `<div class="loading" style="min-height:200px"><div class="spinner"></div>Carregando…</div>`;
+  }
 
   try {
     const data = await loadBoard(stage || undefined);
     lastGeneratedAt = data.generated_at || null;
+    // Mantém a rolagem do quadro e de cada coluna ao redesenhar.
+    const boardScroll = board.scrollLeft;
+    const colScroll = {};
+    $$('.column-body', board).forEach(b => { colScroll[b.dataset.stage] = b.scrollTop; });
     renderColumns(data.columns || [], board);
+    board.scrollLeft = boardScroll;
+    $$('.column-body', board).forEach(b => {
+      if (colScroll[b.dataset.stage] != null) b.scrollTop = colScroll[b.dataset.stage];
+    });
   } catch (err) {
+    if (silent) {
+      showToast(`Erro ao atualizar o quadro: ${err.message}`, 'error');
+      return;
+    }
     const isChatwoot = err.message.includes('Chatwoot');
     const hint = isChatwoot
       ? 'Verifique se o Chatwoot está acessível e se o token do bot é válido.'
@@ -1261,7 +1318,7 @@ function createCard(card) {
       id: card.id,
       contact_name: card.contact_name,
       thumbnail: card.thumbnail,
-      task: card.task || null,
+      task: el.dataset.task ? JSON.parse(el.dataset.task) : null,
     });
   });
 

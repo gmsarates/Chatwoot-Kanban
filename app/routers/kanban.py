@@ -5,7 +5,7 @@ import time as time_module
 from datetime import date
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -93,6 +93,8 @@ async def _bg_sync_task_and_audit(
     previous_state: dict | None,
     new_state: dict | None,
 ) -> None:
+    # Roda antes de responder: assim o quadro, ao recarregar, já lê do Chatwoot
+    # a tarefa atualizada (o /board sincroniza as tarefas a partir dos atributos).
     chatwoot_ok = True
     try:
         await chatwoot_client.safe_update_contact_custom_attributes(
@@ -229,9 +231,7 @@ async def _audit_board_remove(
 
 
 @router.post("/tasks")
-async def create_task(
-    body: CreateTaskRequest, request: Request, background_tasks: BackgroundTasks
-):
+async def create_task(body: CreateTaskRequest, request: Request):
     actor_id, actor_name, actor_email = await _get_actor(request)
 
     existing = await get_active_task(body.contact_id)
@@ -258,8 +258,7 @@ async def create_task(
         TASK_MSG_ATTR_KEY: body.mensaje,
         TASK_DATE_ATTR_KEY: fecha_iso,
     }
-    background_tasks.add_task(
-        _bg_sync_task_and_audit,
+    await _bg_sync_task_and_audit(
         contact_id=body.contact_id,
         attrs=attrs,
         actor_id=actor_id,
@@ -281,10 +280,7 @@ async def create_task(
 
 
 @router.patch("/tasks/{task_id}")
-async def update_task_endpoint(
-    task_id: int, body: EditTaskRequest, request: Request,
-    background_tasks: BackgroundTasks,
-):
+async def update_task_endpoint(task_id: int, body: EditTaskRequest, request: Request):
     actor_id, actor_name, _ = await _get_actor(request)
 
     result = await edit_task(
@@ -303,8 +299,7 @@ async def update_task_endpoint(
             TASK_MSG_ATTR_KEY: body.mensaje,
             TASK_DATE_ATTR_KEY: fecha_iso,
         }
-        background_tasks.add_task(
-            _bg_sync_task_and_audit,
+        await _bg_sync_task_and_audit(
             contact_id=cid,
             attrs=attrs,
             actor_id=actor_id,
@@ -325,9 +320,7 @@ async def update_task_endpoint(
 
 
 @router.patch("/tasks/{task_id}/close")
-async def close_task_endpoint(
-    task_id: int, request: Request, background_tasks: BackgroundTasks
-):
+async def close_task_endpoint(task_id: int, request: Request):
     actor_id, actor_name, _ = await _get_actor(request)
 
     result = await close_task(task_id, cerrado_por=actor_id)
@@ -339,8 +332,7 @@ async def close_task_endpoint(
     previous = result.get("previous", {})
     cid = previous.get("contact_id")
     if cid:
-        background_tasks.add_task(
-            _bg_sync_task_and_audit,
+        await _bg_sync_task_and_audit(
             contact_id=cid,
             attrs={TASK_MSG_ATTR_KEY: "", TASK_DATE_ATTR_KEY: ""},
             actor_id=actor_id,
