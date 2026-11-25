@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -319,6 +319,54 @@ body {
   font-size: 13px;
 }
 
+/* ── Adicionar contato ─────────────────────────────── */
+.col-add {
+  margin-left: auto;
+  margin-right: 6px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.col-add:hover { opacity: 1; background: rgba(127,127,127,.15); }
+.add-search { width: 100%; box-sizing: border-box; }
+.add-results {
+  margin-top: 10px;
+  max-height: 340px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.add-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+.add-result:hover { background: rgba(127,127,127,.08); }
+.add-result .card-avatar { flex-shrink: 0; }
+.add-result-info { flex: 1; min-width: 0; }
+.add-result-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.add-result-sub { font-size: 12px; opacity: 0.65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.add-result-stage {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(127,127,127,.15);
+  margin-top: 2px;
+}
+.add-result button { flex-shrink: 0; padding: 4px 10px; font-size: 13px; }
+.add-empty { padding: 16px 4px; text-align: center; opacity: 0.6; font-size: 13px; }
+
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -418,6 +466,7 @@ body {
   margin-bottom: 4px;
 }
 .modal-field input,
+.modal-field select,
 .modal-field textarea {
   width: 100%;
   font-size: 13px;
@@ -430,6 +479,7 @@ body {
   font-family: inherit;
 }
 .modal-field input:focus,
+.modal-field select:focus,
 .modal-field textarea:focus {
   border-color: rgb(var(--accent));
   box-shadow: 0 0 0 2px rgb(var(--accent-focus));
@@ -536,7 +586,7 @@ body {
 </head>
 <body>
 <div id="app">
-  <div class="loading"><div class="spinner"></div>Cargando tablero…</div>
+  <div class="loading"><div class="spinner"></div>Carregando quadro…</div>
 </div>
 <div id="task-modal-root"></div>
 
@@ -578,14 +628,14 @@ function timeAgo(dateStr) {
   if (isNaN(d.getTime())) return '';
   const now = new Date();
   const diff = now - d;
-  if (diff < 0) return 'ahora';
+  if (diff < 0) return 'agora';
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'ahora';
-  if (mins < 60) return `hace ${mins}m`;
+  if (mins < 1) return 'agora';
+  if (mins < 60) return `há ${mins}min`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `hace ${hrs}h`;
+  if (hrs < 24) return `há ${hrs}h`;
   const days = Math.floor(hrs / 24);
-  return `hace ${days}d`;
+  return `há ${days}d`;
 }
 
 function initials(name) {
@@ -620,7 +670,7 @@ function renderTaskBadge(task) {
   const isOverdue = estado === 'tarea_vencida';
   const cls = isOverdue ? 'card-task overdue' : 'card-task';
   const dateStr = task.fecha_vencimiento
-    ? new Date(task.fecha_vencimiento).toLocaleDateString('es-CL')
+    ? new Date(task.fecha_vencimiento).toLocaleDateString('pt-BR')
     : '';
   const msg = task.mensaje ? escapeHtml(task.mensaje) : '';
   return `
@@ -676,10 +726,10 @@ function openTaskModal(cardData) {
     tarea_cerrada: { bg: 'rgb(var(--text-muted) / 0.15)', text: 'rgb(var(--text-secondary))' },
   };
   const taskLabels = {
-    tarea_activa: 'Activa',
-    tarea_hoy: 'Vence hoy',
+    tarea_activa: 'Ativa',
+    tarea_hoy: 'Vence hoje',
     tarea_vencida: 'Vencida',
-    tarea_cerrada: 'Cerrada',
+    tarea_cerrada: 'Concluída',
   };
 
   const base = (chatwootFrontendUrl || chatwootUrl).replace(/\/+$/, '');
@@ -694,34 +744,34 @@ function openTaskModal(cardData) {
     const tl = taskLabels[computedEstado] || computedEstado;
     const isClosed = computedEstado === 'tarea_cerrada';
     const fechaDisplay = task.fecha_vencimiento
-      ? new Date(task.fecha_vencimiento).toLocaleDateString('es-CL')
+      ? new Date(task.fecha_vencimiento).toLocaleDateString('pt-BR')
       : '—';
     taskSection = `
       <div class="modal-task-info">
         <div class="task-row">
-          <span class="task-label">Estado</span>
+          <span class="task-label">Status</span>
           <span class="modal-task-status" style="background:${tc.bg};color:${tc.text}">${tl}</span>
         </div>
         <div class="task-row">
-          <span class="task-label">Mensaje</span>
+          <span class="task-label">Mensagem</span>
           <span class="task-value">${escapeHtml(task.mensaje)}</span>
         </div>
         <div class="task-row">
-          <span class="task-label">Vencimiento</span>
+          <span class="task-label">Vencimento</span>
           <span class="task-value">${fechaDisplay}</span>
         </div>
         <div class="task-row">
-          <span class="task-label">Creada por</span>
+          <span class="task-label">Criada por</span>
           <span class="task-value">${escapeHtml(task.creado_por || '—')}</span>
         </div>
       </div>
       ${isClosed ? '' : `
         <div class="modal-field">
-          <label for="task-msg">Mensaje</label>
+          <label for="task-msg">Mensagem</label>
           <textarea id="task-msg" rows="2">${escapeHtml(task.mensaje)}</textarea>
         </div>
         <div class="modal-field">
-          <label for="task-date">Vencimiento</label>
+          <label for="task-date">Vencimento</label>
           <input type="date" id="task-date" value="${task.fecha_vencimiento || ''}">
         </div>
       `}
@@ -729,11 +779,11 @@ function openTaskModal(cardData) {
   } else {
     taskSection = `
       <div class="modal-field">
-        <label for="task-msg">Mensaje de la tarea</label>
-        <textarea id="task-msg" rows="2" placeholder="Ej: Enviar propuesta comercial"></textarea>
+        <label for="task-msg">Descrição da tarefa</label>
+        <textarea id="task-msg" rows="2" placeholder="Ex.: Enviar proposta comercial"></textarea>
       </div>
       <div class="modal-field">
-        <label for="task-date">Fecha de vencimiento</label>
+        <label for="task-date">Data de vencimento</label>
         <input type="date" id="task-date">
       </div>
     `;
@@ -742,26 +792,26 @@ function openTaskModal(cardData) {
   const computedEstado = task ? computeTaskEstado(task) : null;
   const taskStatus = task && computedEstado
     ? `<span class="modal-task-status" style="background:${(taskColors[computedEstado] || taskColors.tarea_activa).bg};color:${(taskColors[computedEstado] || taskColors.tarea_activa).text}">${taskLabels[computedEstado] || computedEstado}</span>`
-    : '<span style="font-size:12px;color:rgb(var(--text-muted))">Sin tarea</span>';
+    : '<span style="font-size:12px;color:rgb(var(--text-muted))">Sem tarefa</span>';
 
   let footerButtons = '';
   if (task && computedEstado && computedEstado !== 'tarea_cerrada') {
     footerButtons = `
-      <button class="btn-danger" id="modal-close-task">Cerrar tarea</button>
+      <button class="btn-danger" id="modal-close-task">Concluir tarefa</button>
       <div class="spacer"></div>
       <button class="btn-secondary" id="modal-cancel">Cancelar</button>
-      <button class="btn-primary" id="modal-save">Guardar</button>
+      <button class="btn-primary" id="modal-save">Salvar</button>
     `;
   } else if (task && computedEstado === 'tarea_cerrada') {
     footerButtons = `
       <div class="spacer"></div>
-      <button class="btn-secondary" id="modal-cancel">Cerrar</button>
+      <button class="btn-secondary" id="modal-cancel">Fechar</button>
     `;
   } else {
     footerButtons = `
       <div class="spacer"></div>
       <button class="btn-secondary" id="modal-cancel">Cancelar</button>
-      <button class="btn-primary" id="modal-create">Crear tarea</button>
+      <button class="btn-primary" id="modal-create">Criar tarefa</button>
     `;
   }
 
@@ -769,7 +819,7 @@ function openTaskModal(cardData) {
     <div class="modal-overlay" id="modal-overlay">
       <div class="modal">
         <div class="modal-header">
-          <h3>${escapeHtml(cardData.contact_name || 'Conversación')}</h3>
+          <h3>${escapeHtml(cardData.contact_name || 'Conversa')}</h3>
           <button class="modal-close" id="modal-close-x">&times;</button>
         </div>
         <div class="modal-body">
@@ -777,11 +827,11 @@ function openTaskModal(cardData) {
             <div class="card-avatar">${cardData.thumbnail ? `<img src="${cardData.thumbnail}" alt="">` : initials(cardData.contact_name)}</div>
             <div>
               <div class="card-name">${escapeHtml(cardData.contact_name)}</div>
-              <a href="${chatwootLink}" target="_blank" rel="noopener">Abrir en Chatwoot</a>
+              <a href="${chatwootLink}" target="_blank" rel="noopener">Abrir no Chatwoot</a>
             </div>
           </div>
           <div style="margin-bottom:12px">
-            <span style="font-size:12px;font-weight:500;color:rgb(var(--text-secondary))">Tarea: </span>${taskStatus}
+            <span style="font-size:12px;font-weight:500;color:rgb(var(--text-secondary))">Tarefa: </span>${taskStatus}
           </div>
           ${taskSection}
         </div>
@@ -803,6 +853,120 @@ function openTaskModal(cardData) {
     document.getElementById('modal-close-task')?.addEventListener('click', () => closeTaskAction(task.id));
   } else if (!task) {
     document.getElementById('modal-create')?.addEventListener('click', () => createTask(cardData.id));
+  }
+}
+
+// ── Adicionar contato ─────────────────────────────────
+const API_CONTACT_SEARCH = '/kanban/contacts/search';
+let addSearchTimer = null;
+let addSearchSeq = 0;
+
+function openAddContactModal(defaultStage) {
+  const stages = allColumns.length
+    ? allColumns
+    : $$('.column').map(c => c.dataset.stage);
+  const selected = defaultStage || stages[0] || '';
+  const root = document.getElementById('task-modal-root');
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Adicionar contato ao kanban</h3>
+          <button class="modal-close" id="modal-close-x">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="modal-field">
+            <label>Etapa</label>
+            <select id="add-stage">
+              ${stages.map(st => `<option value="${escapeHtml(st)}" ${st === selected ? 'selected' : ''}>${escapeHtml(st)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="modal-field">
+            <label>Buscar contato</label>
+            <input type="search" id="add-search" class="add-search" placeholder="Nome, telefone ou e-mail" autocomplete="off">
+          </div>
+          <div class="add-results" id="add-results"><div class="add-empty">Carregando…</div></div>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('modal-overlay').addEventListener('click', (e) => {
+    if (e.target.id === 'modal-overlay') closeTaskModal();
+  });
+  document.getElementById('modal-close-x').addEventListener('click', closeTaskModal);
+  const input = document.getElementById('add-search');
+  input.addEventListener('input', () => {
+    clearTimeout(addSearchTimer);
+    addSearchTimer = setTimeout(() => runContactSearch(input.value), 300);
+  });
+  input.focus();
+  runContactSearch('');
+}
+
+async function runContactSearch(q) {
+  const list = document.getElementById('add-results');
+  if (!list) return;
+  const seq = ++addSearchSeq;
+  list.innerHTML = '<div class="add-empty">Buscando…</div>';
+  try {
+    const res = await fetch(`${API_CONTACT_SEARCH}?q=${encodeURIComponent(q.trim())}`);
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+    const data = await res.json();
+    if (seq !== addSearchSeq) return; // resposta antiga, ignora
+    renderContactResults(data.contacts || [], q.trim());
+  } catch (err) {
+    if (seq !== addSearchSeq) return;
+    list.innerHTML = `<div class="add-empty">Erro ao buscar: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderContactResults(contacts, q) {
+  const list = document.getElementById('add-results');
+  if (!list) return;
+  if (!contacts.length) {
+    list.innerHTML = `<div class="add-empty">${q ? 'Nenhum contato encontrado.' : 'Ainda não há contatos.'}</div>`;
+    return;
+  }
+  list.innerHTML = '';
+  contacts.forEach(c => {
+    const name = c.name || c.phone_number || c.email || `#${c.id}`;
+    const sub = [c.phone_number, c.email].filter(Boolean).join(' · ');
+    const row = document.createElement('div');
+    row.className = 'add-result';
+    row.innerHTML = `
+      <div class="card-avatar">${c.thumbnail ? `<img src="${escapeHtml(c.thumbnail)}" alt="">` : escapeHtml(initials(name))}</div>
+      <div class="add-result-info">
+        <div class="add-result-name">${escapeHtml(name)}</div>
+        ${sub ? `<div class="add-result-sub">${escapeHtml(sub)}</div>` : ''}
+        ${c.stage ? `<span class="add-result-stage">Em: ${escapeHtml(c.stage)}</span>` : ''}
+      </div>
+      <button class="btn-primary">${c.stage ? 'Mover' : 'Adicionar'}</button>`;
+    row.querySelector('button').addEventListener('click', (e) => addContactToStage(c, name, e.currentTarget));
+    list.appendChild(row);
+  });
+}
+
+async function addContactToStage(contact, name, btn) {
+  const stage = document.getElementById('add-stage')?.value;
+  if (!stage) { showToast('Escolha uma etapa', 'error'); return; }
+  if (contact.stage === stage) { showToast(`${name} já está em ${stage}`, 'info'); return; }
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const res = await fetch(`${API_MOVE_STAGE}/${contact.id}/stage`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+    contact.stage = stage;
+    btn.textContent = '✓';
+    showToast(`${name} adicionado a ${stage}`, 'success');
+    refreshBoard();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = contact.stage ? 'Mover' : 'Adicionar';
+    showToast(`Erro: ${err.message}`, 'error');
   }
 }
 
@@ -830,11 +994,11 @@ function optimisticTaskUpdate(contactId, taskData) {
 async function createTask(contactId) {
   const msg = document.getElementById('task-msg')?.value?.trim();
   const date = document.getElementById('task-date')?.value;
-  if (!msg) { showToast('Escribe un mensaje para la tarea', 'error'); return; }
-  if (!date) { showToast('Selecciona una fecha de vencimiento', 'error'); return; }
+  if (!msg) { showToast('Escreva a descrição da tarefa', 'error'); return; }
+  if (!date) { showToast('Selecione uma data de vencimento', 'error'); return; }
 
   const btn = document.getElementById('modal-create');
-  if (btn) { btn.disabled = true; btn.textContent = 'Creando…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Criando…'; }
 
   optimisticTaskUpdate(contactId, {
     id: null,
@@ -853,9 +1017,9 @@ async function createTask(contactId) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    showToast(data.action === 'updated' ? 'Tarea actualizada' : 'Tarea creada');
+    showToast(data.action === 'updated' ? 'Tarefa atualizada' : 'Tarefa criada');
   } catch (err) {
-    showToast(`Error: ${err.message}`, 'error');
+    showToast(`Erro: ${err.message}`, 'error');
     refreshBoard();
   }
 }
@@ -863,11 +1027,11 @@ async function createTask(contactId) {
 async function saveTask(taskId) {
   const msg = document.getElementById('task-msg')?.value?.trim();
   const date = document.getElementById('task-date')?.value;
-  if (!msg) { showToast('Escribe un mensaje para la tarea', 'error'); return; }
-  if (!date) { showToast('Selecciona una fecha de vencimiento', 'error'); return; }
+  if (!msg) { showToast('Escreva a descrição da tarefa', 'error'); return; }
+  if (!date) { showToast('Selecione uma data de vencimento', 'error'); return; }
 
   const btn = document.getElementById('modal-save');
-  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando…'; }
 
   optimisticTaskUpdate(currentModalCardId, {
     id: taskId,
@@ -886,16 +1050,16 @@ async function saveTask(taskId) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    showToast('Tarea actualizada');
+    showToast('Tarefa atualizada');
   } catch (err) {
-    showToast(`Error: ${err.message}`, 'error');
+    showToast(`Erro: ${err.message}`, 'error');
     refreshBoard();
   }
 }
 
 async function closeTaskAction(taskId) {
   const btn = document.getElementById('modal-close-task');
-  if (btn) { btn.disabled = true; btn.textContent = 'Cerrando…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Concluindo…'; }
 
   optimisticTaskUpdate(currentModalCardId, null);
   closeTaskModal();
@@ -904,9 +1068,9 @@ async function closeTaskAction(taskId) {
     const res = await fetch(`${API_TASKS}/${taskId}/close`, { method: 'PATCH' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    showToast('Tarea cerrada');
+    showToast('Tarefa concluída');
   } catch (err) {
-    showToast(`Error: ${err.message}`, 'error');
+    showToast(`Erro: ${err.message}`, 'error');
     refreshBoard();
   }
 }
@@ -921,25 +1085,26 @@ function renderBoard(data) {
   const app = document.getElementById('app');
 
   if (columns.length === 0) {
-    app.innerHTML = `<div class="error-banner">No hay columnas configuradas. Verifica que existe el custom attribute <strong>pipeline_01_etapas</strong> en Chatwoot.</div>`;
+    app.innerHTML = `<div class="error-banner">Nenhuma coluna configurada. Verifique se o atributo personalizado <strong>pipeline_01_etapas</strong> existe no Chatwoot.</div>`;
     return;
   }
 
   app.innerHTML = `
     <div class="kanban-header">
       <select id="pipeline-select">
-        <option value="">Todas las etapas</option>
+        <option value="">Todas as etapas</option>
         ${columns.map(c => `<option value="${c.stage}">${c.stage}</option>`).join('')}
       </select>
       <select id="state-filter">
-        <option value="">Todas las tareas</option>
-        <option value="tarea_activa">Activa</option>
-        <option value="tarea_hoy">Vence hoy</option>
+        <option value="">Todas as tarefas</option>
+        <option value="tarea_activa">Ativa</option>
+        <option value="tarea_hoy">Vence hoje</option>
         <option value="tarea_vencida">Vencida</option>
-        <option value="tarea_cerrada">Cerrada</option>
-        <option value="sin_tarea">Sin tarea</option>
+        <option value="tarea_cerrada">Concluída</option>
+        <option value="sin_tarea">Sem tarefa</option>
       </select>
-      <button class="btn" id="refresh-btn">Actualizar</button>
+      <button class="btn" id="add-contact-btn">+ Adicionar contato</button>
+      <button class="btn" id="refresh-btn">Atualizar</button>
       <a href="/kanban/dashboard" class="btn">Dashboard</a>
     </div>
     <div class="board" id="board"></div>
@@ -954,6 +1119,7 @@ function renderBoard(data) {
     refreshBoard();
   });
   document.getElementById('refresh-btn').addEventListener('click', () => refreshBoard());
+  document.getElementById('add-contact-btn').addEventListener('click', () => openAddContactModal());
 
   const board = document.getElementById('board');
   renderColumns(columns, board);
@@ -965,7 +1131,7 @@ async function refreshBoard() {
   activeFilter = taskFilter;
 
   const board = document.getElementById('board');
-  board.innerHTML = `<div class="loading" style="min-height:200px"><div class="spinner"></div>Cargando…</div>`;
+  board.innerHTML = `<div class="loading" style="min-height:200px"><div class="spinner"></div>Carregando…</div>`;
 
   try {
     const data = await loadBoard(stage || undefined);
@@ -974,9 +1140,9 @@ async function refreshBoard() {
   } catch (err) {
     const isChatwoot = err.message.includes('Chatwoot');
     const hint = isChatwoot
-      ? 'Verifica que Chatwoot esté accesible y el bot-token sea válido.'
-      : 'Revisa los logs del contenedor para más detalles.';
-    board.innerHTML = `<div class="error-banner"><strong>Error:</strong> ${escapeHtml(err.message)}<br><small>${hint}</small></div>`;
+      ? 'Verifique se o Chatwoot está acessível e se o token do bot é válido.'
+      : 'Veja os logs do container para mais detalhes.';
+    board.innerHTML = `<div class="error-banner"><strong>Erro:</strong> ${escapeHtml(err.message)}<br><small>${hint}</small></div>`;
   }
 }
 
@@ -998,10 +1164,13 @@ function renderColumns(columns, board) {
     colEl.innerHTML = `
       <div class="column-header">
         <span>${col.stage}</span>
+        <button class="col-add" title="Adicionar contato a esta etapa">+</button>
         <span class="count">${cards.length}</span>
       </div>
       <div class="column-body" data-stage="${col.stage}"></div>
     `;
+
+    colEl.querySelector('.col-add').addEventListener('click', () => openAddContactModal(col.stage));
 
     const body = colEl.querySelector('.column-body');
     cards.forEach(card => {
@@ -1077,7 +1246,7 @@ function setupDropZone(body, targetStage) {
         body: JSON.stringify({ stage: targetStage }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: 'Error desconocido' }));
+        const err = await res.json().catch(() => ({ detail: 'Erro desconhecido' }));
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
       draggable.remove();
@@ -1096,7 +1265,7 @@ function setupDropZone(body, targetStage) {
       updateCounts();
     } catch (err) {
       console.error('Drop failed:', err);
-      showToast(`Error al mover: ${err.message}`, 'error');
+      showToast(`Erro ao mover: ${err.message}`, 'error');
     }
   });
 }
@@ -1182,9 +1351,9 @@ async function init() {
     renderBoard(data);
     startPolling();
   } catch (err) {
-    const detail = err.message || 'Error desconocido';
+    const detail = err.message || 'Erro desconhecido';
     document.getElementById('app').innerHTML =
-      `<div class="error-banner"><strong>Error al iniciar el tablero:</strong> ${escapeHtml(detail)}<br><small> revisa <code>/kanban/debug-status</code> para diagnóstico.</small></div>`;
+      `<div class="error-banner"><strong>Erro ao iniciar o quadro:</strong> ${escapeHtml(detail)}<br><small> veja <code>/kanban/debug-status</code> para diagnóstico.</small></div>`;
   }
 }
 

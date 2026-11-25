@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -177,11 +177,11 @@ tr:hover td { background: rgb(var(--bg-surface)); }
 <body>
 
 <div class="header">
-  <a href="/kanban" class="btn">Volver al Kanban</a>
+  <a href="/kanban" class="btn">Voltar ao Kanban</a>
 </div>
 
 <div class="container" id="app">
-  <div class="loading"><div class="spinner"></div>Cargando…</div>
+  <div class="loading"><div class="spinner"></div>Carregando…</div>
 </div>
 
 <script>
@@ -196,8 +196,8 @@ function escapeHtml(text) {
 
 function actionBadge(action) {
   const map = {
-    create: { label: 'Creada', cls: 'badge-create' },
-    close: { label: 'Cerrada', cls: 'badge-close' },
+    create: { label: 'Criada', cls: 'badge-create' },
+    close: { label: 'Concluída', cls: 'badge-close' },
     edit: { label: 'Editada', cls: 'badge-edit' },
     task_overwritten: { label: 'Sobrescrita', cls: 'badge-overwrite' },
     cron_tick: { label: 'Cron', cls: 'badge-cron' },
@@ -214,12 +214,12 @@ function timeAgo(dateStr) {
   const now = new Date();
   const diff = now - d;
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'ahora';
-  if (mins < 60) return `hace ${mins}m`;
+  if (mins < 1) return 'agora';
+  if (mins < 60) return `há ${mins}min`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `hace ${hrs}h`;
+  if (hrs < 24) return `há ${hrs}h`;
   const days = Math.floor(hrs / 24);
-  return `hace ${days}d`;
+  return `há ${days}d`;
 }
 
 async function loadData() {
@@ -241,39 +241,39 @@ function render(agents, history) {
 
   app.innerHTML = `
     <div class="card-section">
-      <h2>Resumen</h2>
+      <h2>Resumo</h2>
       <div class="stats-grid">
         <div class="stat-card">
-          <div class="stat-label">Tareas creadas</div>
+          <div class="stat-label">Tarefas criadas</div>
           <div class="stat-value">${totalCreated}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Tareas cerradas</div>
+          <div class="stat-label">Tarefas concluídas</div>
           <div class="stat-value">${totalClosed}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Tareas sobrescritas</div>
+          <div class="stat-label">Tarefas sobrescritas</div>
           <div class="stat-value">${totalOverwritten}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Agentes activos</div>
+          <div class="stat-label">Agentes ativos</div>
           <div class="stat-value">${agents.length}</div>
         </div>
       </div>
     </div>
 
     <div class="card-section">
-      <h2>Rendimiento por agente</h2>
+      <h2>Desempenho por agente</h2>
       ${agents.length === 0
-        ? '<div class="empty">No hay datos de agentes todavía.</div>'
+        ? '<div class="empty">Ainda não há dados de agentes.</div>'
         : `<table>
           <thead>
             <tr>
               <th>Agente</th>
-              <th>Creadas</th>
-              <th>Cerradas</th>
+              <th>Criadas</th>
+              <th>Concluídas</th>
               <th>Sobrescritas</th>
-              <th>Cierre OK</th>
+              <th>Conclusão OK</th>
             </tr>
           </thead>
           <tbody>
@@ -292,17 +292,17 @@ function render(agents, history) {
     </div>
 
     <div class="card-section">
-      <h2>Historial reciente</h2>
+      <h2>Histórico recente</h2>
       ${history.length === 0
-        ? '<div class="empty">No hay eventos registrados todavía.</div>'
+        ? '<div class="empty">Ainda não há eventos registrados.</div>'
         : `<table>
           <thead>
             <tr>
               <th>Agente</th>
-              <th>Acción</th>
-              <th>Conversación</th>
+              <th>Ação</th>
+              <th>Conversa</th>
               <th>Sync</th>
-              <th>Cuándo</th>
+              <th>Quando</th>
             </tr>
           </thead>
           <tbody>
@@ -325,7 +325,7 @@ function render(agents, history) {
 loadData().catch(err => {
   document.getElementById('app').innerHTML =
     `<div class="error-banner" style="background:rgb(var(--red) / 0.1);color:rgb(var(--red));border:1px solid rgb(var(--red) / 0.2);border-radius:6px;padding:10px 14px;margin:16px;font-size:13px;">
-      <strong>Error:</strong> ${escapeHtml(err.message)}
+      <strong>Erro:</strong> ${escapeHtml(err.message)}
     </div>`;
 });
 </script>

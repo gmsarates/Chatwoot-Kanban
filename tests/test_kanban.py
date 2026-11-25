@@ -339,4 +339,54 @@ def test_cron_tick_endpoint(client):
 def test_dashboard_page(client):
     response = client.get("/kanban/dashboard")
     assert response.status_code == 200
-    assert "Volver al Kanban" in response.text
+    assert "Voltar ao Kanban" in response.text
+
+
+def test_search_contacts_with_query(client):
+    with patch("app.routers.kanban.chatwoot_client") as mock_client:
+        mock_client.search_contacts = AsyncMock(
+            return_value=[
+                {
+                    "id": 101,
+                    "name": "Juan Pérez",
+                    "phone_number": "+56912345678",
+                    "email": "juan@example.com",
+                    "thumbnail": "",
+                    "custom_attributes": {"pipeline_01_etapas": "Potencial"},
+                },
+                {"id": 102, "name": "María", "custom_attributes": None},
+            ]
+        )
+        response = client.get("/kanban/contacts/search?q=juan")
+    assert response.status_code == 200
+    contacts = response.json()["contacts"]
+    mock_client.search_contacts.assert_awaited_once_with("juan")
+    assert contacts[0] == {
+        "id": 101,
+        "name": "Juan Pérez",
+        "phone_number": "+56912345678",
+        "email": "juan@example.com",
+        "thumbnail": "",
+        "stage": "Potencial",
+    }
+    assert contacts[1]["stage"] is None
+    assert contacts[1]["phone_number"] == ""
+
+
+def test_search_contacts_without_query_lists_recent(client):
+    with patch("app.routers.kanban.chatwoot_client") as mock_client:
+        mock_client.list_recent_contacts = AsyncMock(
+            return_value=[{"id": i, "name": f"C{i}"} for i in range(30)]
+        )
+        mock_client.search_contacts = AsyncMock()
+        response = client.get("/kanban/contacts/search?q=%20%20")
+    assert response.status_code == 200
+    assert len(response.json()["contacts"]) == 20
+    mock_client.search_contacts.assert_not_awaited()
+
+
+def test_search_contacts_chatwoot_error(client):
+    with patch("app.routers.kanban.chatwoot_client") as mock_client:
+        mock_client.search_contacts = AsyncMock(side_effect=Exception("boom"))
+        response = client.get("/kanban/contacts/search?q=x")
+    assert response.status_code == 502

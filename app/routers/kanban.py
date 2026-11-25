@@ -142,7 +142,7 @@ async def move_stage(contact_id: int, body: MoveStageRequest, request: Request):
     if valid_stages and body.stage not in valid_stages:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid stage '{body.stage}'. Valid: {valid_stages}",
+            detail=f"Etapa inválida '{body.stage}'. Válidas: {valid_stages}",
         )
 
     try:
@@ -184,7 +184,7 @@ async def move_stage(contact_id: int, body: MoveStageRequest, request: Request):
             chatwoot_call_ok=False,
         )
         raise HTTPException(
-            status_code=502, detail=f"Chatwoot API error: {exc}"
+            status_code=502, detail=f"Erro na API do Chatwoot: {exc}"
         ) from exc
 
 
@@ -253,7 +253,7 @@ async def update_task_endpoint(
         fecha_vencimiento=body.fecha_vencimiento,
     )
     if result.get("error") == "not_found":
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
 
     previous = result.get("previous", {})
     cid = previous.get("contact_id")
@@ -292,9 +292,9 @@ async def close_task_endpoint(
 
     result = await close_task(task_id, cerrado_por=actor_id)
     if result.get("error") == "not_found":
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
     if result.get("error") == "already_closed":
-        raise HTTPException(status_code=409, detail="Task is already closed")
+        raise HTTPException(status_code=409, detail="A tarefa já foi concluída")
 
     previous = result.get("previous", {})
     cid = previous.get("contact_id")
@@ -354,6 +354,43 @@ async def kanban_stats_history(limit: int = 50):
     return {"history": history}
 
 
+_SEARCH_LIMIT = 20
+
+
+@router.get("/contacts/search")
+async def search_contacts(q: str = ""):
+    """Contatos do Chatwoot para o botão "Adicionar contato".
+
+    Sem termo de busca devolve os contatos com atividade mais recente.
+    """
+    query = q.strip()
+    try:
+        if query:
+            raw = await chatwoot_client.search_contacts(query)
+        else:
+            raw = await chatwoot_client.list_recent_contacts()
+    except Exception as exc:
+        logger.error("Failed to search contacts (q=%r): %s", query, exc)
+        raise HTTPException(
+            status_code=502, detail=f"Erro na API do Chatwoot: {exc}"
+        ) from exc
+
+    results = []
+    for contact in raw[:_SEARCH_LIMIT]:
+        attrs = contact.get("custom_attributes") or {}
+        results.append(
+            {
+                "id": contact.get("id"),
+                "name": contact.get("name") or "",
+                "phone_number": contact.get("phone_number") or "",
+                "email": contact.get("email") or "",
+                "thumbnail": contact.get("thumbnail") or "",
+                "stage": attrs.get(PIPELINE_ATTR_KEY) or None,
+            }
+        )
+    return {"contacts": results}
+
+
 @router.get("/config")
 async def kanban_config():
     try:
@@ -361,7 +398,7 @@ async def kanban_config():
     except Exception as exc:
         logger.error("Failed to fetch attribute definitions: %s", exc)
         raise HTTPException(
-            status_code=502, detail=f"Chatwoot API error: {exc}"
+            status_code=502, detail=f"Erro na API do Chatwoot: {exc}"
         ) from exc
 
     pipeline_attr = _find_pipeline_attribute(definitions)
@@ -392,7 +429,7 @@ async def kanban_board(stage: str | None = None):
     except Exception as exc:
         logger.error("Failed to fetch attribute definitions: %s", exc)
         raise HTTPException(
-            status_code=502, detail=f"Chatwoot API error: {exc}"
+            status_code=502, detail=f"Erro na API do Chatwoot: {exc}"
         ) from exc
 
     pipeline_attr = _find_pipeline_attribute(definitions)
@@ -463,7 +500,7 @@ async def kanban_board(stage: str | None = None):
             logger.error("Failed to filter contacts for stage '%s': %s", s, exc)
             raise HTTPException(
                 status_code=502,
-                detail=f"Chatwoot API error filtering stage '{s}': {exc}",
+                detail=f"Erro na API do Chatwoot ao filtrar a etapa '{s}': {exc}",
             ) from exc
 
     stage_tasks = [_load_stage(s) for s in target_stages]

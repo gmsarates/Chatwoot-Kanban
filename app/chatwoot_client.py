@@ -103,6 +103,24 @@ class ChatwootClient:
         resp = await self._request("POST", url, json=body)
         return resp.json()
 
+    async def search_contacts(self, query: str, page: int = 1) -> list:
+        """Busca contatos por nome, telefone ou email (API de busca do Chatwoot)."""
+        url = f"{self._account_path}/contacts/search"
+        resp = await self._request(
+            "GET", url, params={"q": query, "page": page, "include_contacts": "true"}
+        )
+        data = resp.json()
+        return data.get("payload", []) if isinstance(data, dict) else data
+
+    async def list_recent_contacts(self, page: int = 1) -> list:
+        """Contatos com atividade mais recente primeiro."""
+        url = f"{self._account_path}/contacts"
+        resp = await self._request(
+            "GET", url, params={"page": page, "sort": "-last_activity_at"}
+        )
+        data = resp.json()
+        return data.get("payload", []) if isinstance(data, dict) else data
+
     async def get_contact(self, contact_id: int) -> dict:
         url = f"{self._account_path}/contacts/{contact_id}"
         resp = await self._request("GET", url)
