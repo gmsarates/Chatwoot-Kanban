@@ -234,6 +234,7 @@ reinstaladas pelo Turvia (`infra/README.md` do Turvia, seção 8.7).
 | PUT    | `/kanban/stages/order`                | Reorder stages (columns)        |
 | GET    | `/kanban/contacts/available`          | Ids of contacts not on the board|
 | POST   | `/kanban/board/bulk-stage`            | Put up to 50 contacts in a stage|
+| POST   | `/kanban/board/bulk-remove`           | Take up to 50 contacts off board|
 | POST   | `/kanban/tasks`                       | Create task                     |
 | PATCH  | `/kanban/tasks/{task_id}`             | Edit task                       |
 | PATCH  | `/kanban/tasks/{task_id}/close`       | Close task                      |

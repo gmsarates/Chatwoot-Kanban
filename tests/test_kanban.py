@@ -589,3 +589,60 @@ def test_bulk_stage_rejects_invalid_stage_and_big_batch(
         json={"stage": "Potencial", "contact_ids": list(range(51))},
     )
     assert r.status_code == 400
+
+
+# ── Paginação das etapas (o Chatwoot devolve 15 por página) ──
+
+
+def _pagina_filtro(ids, count):
+    return {
+        "meta": {"count": count},
+        "payload": [{"id": i, "name": f"C{i}", "custom_attributes": {}} for i in ids],
+    }
+
+
+def test_board_loads_every_page_of_15(client, mock_chatwoot_ok):
+    paginas = {
+        1: _pagina_filtro(range(1, 16), 40),
+        2: _pagina_filtro(range(16, 31), 40),
+        3: _pagina_filtro(range(31, 41), 40),
+    }
+
+    async def filtrar(payload, page=1):
+        return paginas[page]
+
+    mock_chatwoot_ok.filter_contacts = AsyncMock(side_effect=filtrar)
+    cards = client.get("/kanban/board?stage=Potencial").json()["columns"][0]["contacts"]
+    assert [c["id"] for c in cards] == list(range(1, 41))
+    assert mock_chatwoot_ok.filter_contacts.await_count == 3
+
+
+def test_board_stops_on_empty_page_without_count(client, mock_chatwoot_ok):
+    paginas = {1: _pagina_filtro(range(1, 16), 0), 2: _pagina_filtro([], 0)}
+
+    async def filtrar(payload, page=1):
+        return paginas[page]
+
+    mock_chatwoot_ok.filter_contacts = AsyncMock(side_effect=filtrar)
+    cards = client.get("/kanban/board?stage=Potencial").json()["columns"][0]["contacts"]
+    assert len(cards) == 15
+
+
+@patch("app.routers.kanban.get_or_create_agent", new_callable=AsyncMock)
+@patch("app.routers.kanban.write_audit_log", new_callable=AsyncMock)
+def test_bulk_remove(_audit, agent, client, mock_chatwoot_ok):
+    agent.return_value = _AGENTE
+
+    async def remover(contact_id, keys):
+        if contact_id == 2:
+            raise RuntimeError("boom")
+        assert keys == ["pipeline_01_etapas"]
+        return {}
+
+    mock_chatwoot_ok.remove_contact_custom_attributes = AsyncMock(side_effect=remover)
+    r = client.post("/kanban/board/bulk-remove", json={"contact_ids": [1, 2, 3]})
+    assert r.status_code == 200
+    assert sorted(r.json()["removed"]) == [1, 3]
+    assert r.json()["failed"] == [{"id": 2, "error": "boom"}]
+    r = client.post("/kanban/board/bulk-remove", json={"contact_ids": list(range(51))})
+    assert r.status_code == 400

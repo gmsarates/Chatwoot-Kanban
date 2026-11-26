@@ -104,11 +104,10 @@ class ChatwootClient:
         resp = await self._request("POST", url, json=body)
         return resp.json()
 
-    async def filter_contacts(
-        self, payload: dict, page: int = 1, page_size: int = 50
-    ) -> dict:
+    async def filter_contacts(self, payload: dict, page: int = 1) -> dict:
+        # O Chatwoot devolve 15 por página e não aceita outro tamanho.
         url = f"{self._account_path}/contacts/filter"
-        body = {**payload, "page": page, "page_size": page_size}
+        body = {**payload, "page": page}
         resp = await self._request("POST", url, json=body)
         return resp.json()
 

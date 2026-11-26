@@ -384,6 +384,36 @@ body {
   border-radius: 6px;
 }
 .col-add:hover { opacity: 1; background: rgba(127,127,127,.15); }
+.col-clear {
+  margin-right: 4px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.45;
+  cursor: pointer;
+  padding: 3px 5px;
+  border-radius: 6px;
+  display: inline-flex;
+}
+.col-clear:hover { opacity: 1; color: rgb(var(--red)); background: rgb(var(--red) / 0.1); }
+.col-confirm {
+  margin: 8px 8px 0;
+  padding: 10px;
+  border: 1px solid rgb(var(--red) / 0.3);
+  background: rgb(var(--red) / 0.06);
+  border-radius: 6px;
+  font-size: 12px;
+  color: rgb(var(--text-primary));
+  text-transform: none;
+  letter-spacing: normal;
+}
+.col-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+.col-confirm-actions button { font-size: 12px; padding: 4px 10px; }
 .add-search { width: 100%; box-sizing: border-box; }
 .add-results {
   margin-top: 10px;
@@ -1634,14 +1664,20 @@ function renderColumns(columns, board) {
     colEl.dataset.stage = col.stage;
     colEl.innerHTML = `
       <div class="column-header">
-        <span>${col.stage}</span>
+        <span>${escapeHtml(col.stage)}</span>
         <button class="col-add" title="Adicionar contato a esta etapa">+</button>
+        <button class="col-clear" title="Remover todos desta etapa do kanban">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
+        </button>
         <span class="count">${cards.length}</span>
       </div>
       <div class="column-body" data-stage="${col.stage}"></div>
     `;
 
     colEl.querySelector('.col-add').addEventListener('click', () => openAddContactModal(col.stage));
+    // Todos os contatos da etapa, mesmo os escondidos pelo filtro de tarefas.
+    const allIds = (col.contacts || []).map(c => c.id).filter(Boolean);
+    colEl.querySelector('.col-clear').addEventListener('click', () => askClearStage(colEl, col.stage, allIds));
 
     const body = colEl.querySelector('.column-body');
     cards.forEach(card => {
@@ -1651,6 +1687,65 @@ function renderColumns(columns, board) {
     setupDropZone(body, col.stage);
     board.appendChild(colEl);
   });
+}
+
+// ── Remover todos da etapa ──
+const API_BULK_REMOVE = '/kanban/board/bulk-remove';
+
+function endClearStage() {
+  currentModalCardId = null;
+  startPolling();
+}
+
+function askClearStage(colEl, stage, ids) {
+  if (colEl.querySelector('.col-confirm')) return;
+  if (!ids.length) { showToast(`A etapa ${stage} já está vazia`, 'info'); return; }
+  stopPolling();
+  currentModalCardId = 'clear-stage'; // segura o polling enquanto decide
+  const box = document.createElement('div');
+  box.className = 'col-confirm';
+  box.innerHTML = `
+    <div class="col-confirm-text">Tirar <strong>${ids.length}</strong> contato${ids.length > 1 ? 's' : ''} de <strong>${escapeHtml(stage)}</strong> do kanban? Eles continuam no Chatwoot.</div>
+    <div class="col-confirm-actions">
+      <button class="btn-secondary" data-act="cancel">Cancelar</button>
+      <button class="btn-danger" data-act="ok">Remover todos</button>
+    </div>`;
+  colEl.querySelector('.column-header').after(box);
+  box.querySelector('[data-act="cancel"]').addEventListener('click', () => { box.remove(); endClearStage(); });
+  box.querySelector('[data-act="ok"]').addEventListener('click', () => clearStage(box, stage, ids));
+}
+
+async function clearStage(box, stage, ids) {
+  const text = box.querySelector('.col-confirm-text');
+  box.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  let removed = 0;
+  let failed = 0;
+  for (let i = 0; i < ids.length; i += BULK_BATCH) {
+    text.textContent = `Removendo ${i}/${ids.length}…`;
+    const lote = ids.slice(i, i + BULK_BATCH);
+    try {
+      const res = await fetch(API_BULK_REMOVE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contact_ids: lote }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+      const data = await res.json();
+      removed += (data.removed || []).length;
+      failed += (data.failed || []).length;
+    } catch (err) {
+      console.error('Lote falhou:', err);
+      failed += lote.length;
+    }
+  }
+  box.remove();
+  if (failed) {
+    showToast(`${removed} removido(s) de ${stage}; ${failed} ${failed === 1 ? 'falhou' : 'falharam'} (veja os logs)`, 'error');
+  } else {
+    showToast(`${removed} contato(s) removido(s) de ${stage}`, 'success');
+  }
+  endClearStage();
+  refreshBoard({ silent: true });
 }
 
 function createCard(card) {

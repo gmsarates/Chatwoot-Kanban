@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import math
 import time as time_module
 from datetime import date
 from pathlib import Path
@@ -38,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 _board_cache: dict[str, tuple[float, dict]] = {}
 _BOARD_CACHE_TTL = 8
-_PAGE_SIZE = 50
+_STAGE_MAX_PAGES = 400  # 6.000 contatos por etapa
 
 # Etiquetas: o Chatwoot não manda as etiquetas na lista de contatos, então cada
 # contato custa uma chamada. O cache segura isso entre os polls do quadro; o botão
@@ -739,6 +738,46 @@ async def bulk_stage(body: BulkStageRequest, request: Request):
     return {"added": added, "failed": failed}
 
 
+class BulkRemoveRequest(BaseModel):
+    contact_ids: list[int]
+
+
+@router.post("/board/bulk-remove")
+async def bulk_remove(body: BulkRemoveRequest, request: Request):
+    """Tira um lote de contatos do kanban (apaga o atributo de etapa).
+
+    Contatos e conversas continuam no Chatwoot; só saem do quadro.
+    """
+    if len(body.contact_ids) > _BULK_BATCH_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No máximo {_BULK_BATCH_MAX} contatos por lote.",
+        )
+    actor_id, actor_name, _ = await _get_actor(request)
+    sem = asyncio.Semaphore(_BULK_CONCURRENCY)
+    removed: list[int] = []
+    failed: list[dict] = []
+
+    async def _um(contact_id: int) -> None:
+        async with sem:
+            try:
+                await chatwoot_client.remove_contact_custom_attributes(
+                    contact_id, [PIPELINE_ATTR_KEY]
+                )
+                ok = True
+                removed.append(contact_id)
+            except Exception as exc:  # um contato com erro não para o lote
+                logger.error("Bulk remove failed for contact %s: %s", contact_id, exc)
+                ok = False
+                failed.append({"id": contact_id, "error": str(exc)})
+        await _audit_board_remove(contact_id, actor_id, actor_name, ok=ok)
+
+    await asyncio.gather(*(_um(cid) for cid in dict.fromkeys(body.contact_ids)))
+    if removed:
+        _invalidate_board_cache()
+    return {"removed": removed, "failed": failed}
+
+
 @router.get("/config")
 async def kanban_config(fresh: bool = False):
     if fresh:  # a tela de ordenar etapas precisa da lista atual, não da do cache
@@ -811,18 +850,26 @@ async def kanban_board(stage: str | None = None, fresh: bool = False):
             ]
         }
         all_cards = []
+        vistos: set = set()
         page = 1
         try:
+            # O Chatwoot ignora page_size e devolve 15 por página, então não dá para
+            # calcular o total de páginas: busca até juntar o "count" ou a página vir
+            # vazia/repetida.
             while True:
                 resp = await chatwoot_client.filter_contacts(payload, page=page)
-                cards = _parse_contacts(resp)
+                cards = [c for c in _parse_contacts(resp) if c.get("id") not in vistos]
+                if not cards:
+                    break
+                vistos.update(c.get("id") for c in cards)
                 all_cards.extend(cards)
-                meta = _extract_meta(resp)
-                count = meta.get("count", 0)
-                total_pages = max(1, math.ceil(count / _PAGE_SIZE)) if count else 1
-                if page >= total_pages:
+                count = _extract_meta(resp).get("count") or 0
+                if count and len(all_cards) >= count:
                     break
                 page += 1
+                if page > _STAGE_MAX_PAGES:
+                    logger.warning("Etapa '%s': parou em %s páginas", s, page - 1)
+                    break
 
             contacts_data = [
                 {
