@@ -427,3 +427,51 @@ def test_remove_from_board_chatwoot_error(client):
         response = client.delete("/kanban/board/101/stage")
     assert response.status_code == 502
     assert mock_audit.await_args.kwargs["chatwoot_call_ok"] is False
+
+
+# ── Ordem das etapas ─────────────────────────────────
+
+
+def test_reorder_stages_updates_chatwoot(client, mock_chatwoot_ok):
+    mock_chatwoot_ok.update_custom_attribute_values = AsyncMock(return_value={})
+    nova = ["Cerrado", "Potencial", "En evaluación"]
+    response = client.put("/kanban/stages/order", json={"stages": nova})
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "stages": nova}
+    mock_chatwoot_ok.update_custom_attribute_values.assert_awaited_once_with(6, nova)
+
+
+def test_reorder_stages_same_order_skips_chatwoot(client, mock_chatwoot_ok):
+    mock_chatwoot_ok.update_custom_attribute_values = AsyncMock(return_value={})
+    atual = ["Potencial", "En evaluación", "Cerrado"]
+    response = client.put("/kanban/stages/order", json={"stages": atual})
+    assert response.status_code == 200
+    mock_chatwoot_ok.update_custom_attribute_values.assert_not_awaited()
+
+
+def test_reorder_stages_rejects_different_set(client, mock_chatwoot_ok):
+    mock_chatwoot_ok.update_custom_attribute_values = AsyncMock(return_value={})
+    for etapas in (
+        ["Potencial", "Cerrado"],
+        ["Potencial", "En evaluación", "Nova"],
+        ["Potencial", "Potencial", "Cerrado"],
+    ):
+        response = client.put("/kanban/stages/order", json={"stages": etapas})
+        assert response.status_code == 409
+    mock_chatwoot_ok.update_custom_attribute_values.assert_not_awaited()
+
+
+def test_reorder_stages_forbidden_when_not_admin(client, mock_chatwoot_ok):
+    import httpx
+
+    req = httpx.Request("PATCH", "https://test.chatwoot.com/x")
+    resp = httpx.Response(401, request=req)
+    mock_chatwoot_ok.update_custom_attribute_values = AsyncMock(
+        side_effect=httpx.HTTPStatusError("401", request=req, response=resp)
+    )
+    response = client.put(
+        "/kanban/stages/order",
+        json={"stages": ["Cerrado", "Potencial", "En evaluación"]},
+    )
+    assert response.status_code == 403
+    assert "administrador" in response.json()["detail"]

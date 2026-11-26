@@ -5,6 +5,7 @@ import time as time_module
 from datetime import date
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -51,6 +52,10 @@ TASK_DATE_ATTR_KEY = "kanban_view_fecha_termino"
 
 class MoveStageRequest(BaseModel):
     stage: str
+
+
+class StageOrderRequest(BaseModel):
+    stages: list[str]
 
 
 class CreateTaskRequest(BaseModel):
@@ -238,6 +243,69 @@ async def move_stage(contact_id: int, body: MoveStageRequest, request: Request):
         raise HTTPException(
             status_code=502, detail=f"Erro na API do Chatwoot: {exc}"
         ) from exc
+
+
+@router.put("/stages/order")
+async def reorder_stages(body: StageOrderRequest):
+    """Muda a ordem das colunas regravando a lista de valores do atributo de etapas.
+
+    A ordem do quadro é a ordem dessa lista no Chatwoot, então vale para todo mundo
+    e para a tela de atributos do próprio Chatwoot. Só aceita a mesma lista reordenada:
+    nada de criar, renomear ou apagar etapa por aqui.
+    """
+    try:
+        chatwoot_client.clear_attribute_cache()  # compara com a lista atual, não a do cache
+        definitions = await chatwoot_client.get_custom_attribute_definitions()
+    except Exception as exc:
+        logger.error("Failed to fetch attribute definitions: %s", exc)
+        raise HTTPException(
+            status_code=502, detail=f"Erro na API do Chatwoot: {exc}"
+        ) from exc
+
+    pipeline_attr = _find_pipeline_attribute(definitions)
+    if not pipeline_attr or not pipeline_attr.get("id"):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Atributo '{PIPELINE_ATTR_KEY}' não encontrado no Chatwoot.",
+        )
+
+    current = list(pipeline_attr.get("attribute_values") or [])
+    if len(body.stages) != len(current) or sorted(body.stages) != sorted(current):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "As etapas mudaram no Chatwoot enquanto você reordenava. "
+                "Atualize o quadro e tente de novo."
+            ),
+        )
+    if body.stages == current:
+        return {"ok": True, "stages": current}
+
+    try:
+        await chatwoot_client.update_custom_attribute_values(
+            pipeline_attr["id"], body.stages
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (401, 403):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "O Chatwoot recusou: mudar a ordem das etapas exige que o usuário "
+                    "do token do kanban seja administrador da conta."
+                ),
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail=f"Erro na API do Chatwoot: {exc}"
+        ) from exc
+    except Exception as exc:
+        logger.error("Failed to reorder stages: %s", exc)
+        raise HTTPException(
+            status_code=502, detail=f"Erro na API do Chatwoot: {exc}"
+        ) from exc
+
+    _invalidate_board_cache()
+    logger.info("Ordem das etapas alterada: %s", body.stages)
+    return {"ok": True, "stages": body.stages}
 
 
 @router.delete("/board/{contact_id}/stage")
@@ -495,7 +563,9 @@ async def search_contacts(q: str = ""):
 
 
 @router.get("/config")
-async def kanban_config():
+async def kanban_config(fresh: bool = False):
+    if fresh:  # a tela de ordenar etapas precisa da lista atual, não da do cache
+        chatwoot_client.clear_attribute_cache()
     try:
         definitions = await chatwoot_client.get_custom_attribute_definitions()
     except Exception as exc:

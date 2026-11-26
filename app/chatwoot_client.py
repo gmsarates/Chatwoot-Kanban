@@ -189,6 +189,25 @@ class ChatwootClient:
         self._attr_cache[account_id] = (now, definitions)
         return definitions
 
+    async def update_custom_attribute_values(
+        self, definition_id: int, values: list[str]
+    ) -> dict:
+        """Regrava a lista de valores de um atributo do tipo lista (ex.: a ordem das etapas).
+
+        O Chatwoot só aceita isso de um usuário administrador da conta.
+        """
+        url = f"{self._account_path}/custom_attribute_definitions/{definition_id}"
+        resp = await self._request(
+            "PATCH",
+            url,
+            json={"custom_attribute_definition": {"attribute_values": values}},
+        )
+        self.clear_attribute_cache()
+        return resp.json() if resp.content else {}
+
+    def clear_attribute_cache(self) -> None:
+        self._attr_cache.pop(self.account_id, None)
+
     async def update_custom_attributes(
         self, conversation_id: int, attributes: dict
     ) -> dict:

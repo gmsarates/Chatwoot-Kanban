@@ -590,6 +590,51 @@ body {
   font-size: 11px;
   font-weight: 500;
 }
+/* ── Ordenar etapas ── */
+.order-hint {
+  font-size: 12px;
+  color: rgb(var(--text-muted));
+  margin-bottom: 10px;
+}
+.order-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.order-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgb(var(--bg-card));
+  border: 1px solid rgb(var(--border));
+  border-radius: 6px;
+  font-size: 13px;
+  color: rgb(var(--text-primary));
+  cursor: grab;
+  user-select: none;
+}
+.order-item.dragging { opacity: 0.4; }
+.order-item.drop-before { box-shadow: 0 -2px 0 rgb(var(--accent)); }
+.order-item.drop-after { box-shadow: 0 2px 0 rgb(var(--accent)); }
+.order-handle { color: rgb(var(--text-muted)); font-size: 14px; line-height: 1; }
+.order-pos { color: rgb(var(--text-muted)); font-size: 11px; min-width: 16px; }
+.order-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.order-btn {
+  border: 1px solid rgb(var(--border));
+  background: transparent;
+  color: rgb(var(--text-secondary));
+  border-radius: 4px;
+  width: 26px;
+  height: 24px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.order-btn:hover:not(:disabled) { background: rgb(var(--border)); }
+.order-btn:disabled { opacity: 0.3; cursor: default; }
 </style>
 </head>
 <body>
@@ -693,8 +738,8 @@ function renderTaskBadge(task) {
   `;
 }
 
-async function loadConfig() {
-  const res = await fetch(API_CONFIG);
+async function loadConfig({ fresh = false } = {}) {
+  const res = await fetch(fresh ? `${API_CONFIG}?fresh=1` : API_CONFIG);
   const data = await res.json();
   chatwootUrl = data.chatwoot_url || '';
   chatwootAccountId = data.chatwoot_account_id || '';
@@ -1016,6 +1061,148 @@ async function addContactToStage(contact, name, btn) {
   }
 }
 
+// ── Ordenar etapas ────────────────────────────────────
+// A ordem das colunas é a ordem dos valores do atributo de etapas no Chatwoot;
+// salvar aqui regrava essa lista lá, então vale para todos que abrem o quadro.
+const API_STAGE_ORDER = '/kanban/stages/order';
+let stageOrderDraft = [];
+let stageOrderOriginal = [];
+
+async function openStageOrderModal() {
+  stopPolling();
+  currentModalCardId = 'stage-order';
+  const root = document.getElementById('task-modal-root');
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Ordenar etapas</h3>
+          <button class="modal-close" id="modal-close-x">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="order-hint">Arraste ou use as setas. A nova ordem vale para todos que usam o quadro.</div>
+          <ul class="order-list" id="order-list"><li class="add-empty">Carregando…</li></ul>
+        </div>
+        <div class="modal-footer">
+          <span class="spacer"></span>
+          <button class="btn-secondary" id="modal-cancel">Cancelar</button>
+          <button class="btn-primary" id="order-save" disabled>Salvar ordem</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-overlay').addEventListener('click', (e) => {
+    if (e.target.id === 'modal-overlay') closeTaskModal();
+  });
+  document.getElementById('modal-close-x').addEventListener('click', closeTaskModal);
+  document.getElementById('modal-cancel').addEventListener('click', closeTaskModal);
+  document.getElementById('order-save').addEventListener('click', saveStageOrder);
+
+  try {
+    // Busca a lista atual em vez de confiar na que foi carregada ao abrir a página.
+    const data = await loadConfig({ fresh: true });
+    stageOrderOriginal = [...(data.columns || [])];
+    stageOrderDraft = [...stageOrderOriginal];
+    renderStageOrderList();
+  } catch (err) {
+    const list = document.getElementById('order-list');
+    if (list) list.innerHTML = `<li class="add-empty">Erro ao carregar as etapas: ${escapeHtml(err.message)}</li>`;
+  }
+}
+
+function moveStageInDraft(from, to) {
+  if (to < 0 || to >= stageOrderDraft.length || from === to) return;
+  const [item] = stageOrderDraft.splice(from, 1);
+  stageOrderDraft.splice(to, 0, item);
+  renderStageOrderList();
+}
+
+function renderStageOrderList() {
+  const list = document.getElementById('order-list');
+  if (!list) return;
+  const save = document.getElementById('order-save');
+  if (save) save.disabled = stageOrderDraft.join('\u0000') === stageOrderOriginal.join('\u0000');
+  if (!stageOrderDraft.length) {
+    list.innerHTML = '<li class="add-empty">Nenhuma etapa configurada.</li>';
+    return;
+  }
+  list.innerHTML = '';
+  const last = stageOrderDraft.length - 1;
+  stageOrderDraft.forEach((stage, i) => {
+    const li = document.createElement('li');
+    li.className = 'order-item';
+    li.draggable = true;
+    li.innerHTML = `
+      <span class="order-handle">⠿</span>
+      <span class="order-pos">${i + 1}</span>
+      <span class="order-name" title="${escapeHtml(stage)}">${escapeHtml(stage)}</span>
+      <button class="order-btn" data-dir="-1" title="Mover para a esquerda" ${i === 0 ? 'disabled' : ''}>▲</button>
+      <button class="order-btn" data-dir="1" title="Mover para a direita" ${i === last ? 'disabled' : ''}>▼</button>`;
+    li.querySelectorAll('.order-btn').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        moveStageInDraft(i, i + Number(b.dataset.dir));
+      });
+    });
+
+    li.addEventListener('dragstart', (e) => {
+      li.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('application/x-stage-index', String(i));
+    });
+    li.addEventListener('dragend', () => li.classList.remove('dragging'));
+    li.addEventListener('dragover', (e) => {
+      if (!e.dataTransfer.types.includes('application/x-stage-index')) return;
+      e.preventDefault();
+      const after = e.offsetY > li.offsetHeight / 2;
+      li.classList.toggle('drop-after', after);
+      li.classList.toggle('drop-before', !after);
+    });
+    li.addEventListener('dragleave', () => li.classList.remove('drop-before', 'drop-after'));
+    li.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const after = li.classList.contains('drop-after');
+      li.classList.remove('drop-before', 'drop-after');
+      const from = Number(e.dataTransfer.getData('application/x-stage-index'));
+      if (Number.isNaN(from)) return;
+      let to = after ? i + 1 : i;
+      if (from < to) to -= 1; // o item sai da lista antes de entrar de novo
+      moveStageInDraft(from, to);
+    });
+    list.appendChild(li);
+  });
+}
+
+async function saveStageOrder() {
+  const btn = document.getElementById('order-save');
+  setModalBusy(btn, 'Salvando…');
+  try {
+    const res = await fetch(API_STAGE_ORDER, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stages: stageOrderDraft }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+    const data = await res.json();
+    allColumns = data.stages || [...stageOrderDraft];
+    updatePipelineSelect();
+    closeTaskModal();
+    showToast('Ordem das etapas salva', 'success');
+    refreshBoard({ silent: true });
+  } catch (err) {
+    unsetModalBusy(btn, 'Salvar ordem');
+    showToast(`Erro ao salvar a ordem: ${err.message}`, 'error');
+  }
+}
+
+function updatePipelineSelect() {
+  const sel = document.getElementById('pipeline-select');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Todas as etapas</option>' +
+    allColumns.map(st => `<option value="${escapeHtml(st)}">${escapeHtml(st)}</option>`).join('');
+  sel.value = allColumns.includes(current) ? current : '';
+}
+
 function closeTaskModal() {
   document.getElementById('task-modal-root').innerHTML = '';
   currentModalCardId = null;
@@ -1187,6 +1374,7 @@ function renderBoard(data) {
         <option value="sin_tarea">Sem tarefa</option>
       </select>
       <button class="btn" id="add-contact-btn">+ Adicionar contato</button>
+      <button class="btn" id="order-stages-btn">Ordenar etapas</button>
       <button class="btn" id="refresh-btn">Atualizar</button>
       <a href="/kanban/dashboard" class="btn">Dashboard</a>
     </div>
@@ -1203,6 +1391,7 @@ function renderBoard(data) {
   });
   document.getElementById('refresh-btn').addEventListener('click', () => refreshBoard());
   document.getElementById('add-contact-btn').addEventListener('click', () => openAddContactModal());
+  document.getElementById('order-stages-btn').addEventListener('click', openStageOrderModal);
 
   const board = document.getElementById('board');
   renderColumns(columns, board);

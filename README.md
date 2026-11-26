@@ -151,6 +151,8 @@ Create these **contact** custom attributes in Chatwoot (*Settings → Custom Att
 
 > **Note:** The pipeline attribute key is configurable via `PIPELINE_ATTR_KEY` in `app/routers/kanban.py:37`.
 
+**Ordem das colunas:** as colunas seguem a ordem dos valores do `pipeline_01_etapas` (atributo do tipo *Lista*). O botão **Ordenar etapas** do quadro regrava essa lista no Chatwoot, então a nova ordem vale para todos. Para isso o usuário dono do `CHATWOOT_BOT_TOKEN` precisa ser **administrador** da conta (o Chatwoot só deixa admin alterar atributos personalizados); sem isso o quadro avisa e não muda nada.
+
 ### Cron
 
 To enable daily stage transitions, call the cron endpoint daily (e.g., via external cron job):
@@ -229,6 +231,7 @@ reinstaladas pelo Turvia (`infra/README.md` do Turvia, seção 8.7).
 | GET    | `/kanban/config`                      | Pipeline config & Chatwoot URLs |
 | GET    | `/kanban/board`                       | Board data with task sync       |
 | PATCH  | `/kanban/board/{contact_id}/stage`    | Move contact to stage           |
+| PUT    | `/kanban/stages/order`                | Reorder stages (columns)        |
 | POST   | `/kanban/tasks`                       | Create task                     |
 | PATCH  | `/kanban/tasks/{task_id}`             | Edit task                       |
 | PATCH  | `/kanban/tasks/{task_id}/close`       | Close task                      |
