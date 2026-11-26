@@ -29,6 +29,11 @@ MOCK_ATTRIBUTE_DEFINITIONS = [
     }
 ]
 
+MOCK_LABELS = [
+    {"id": 1, "title": "vip", "color": "#ff0000"},
+    {"id": 2, "title": "agencia", "color": "#00aa00"},
+]
+
 MOCK_CONTACTS_FILTER_RESPONSE = {
     "meta": {"count": 2, "current_page": 1},
     "payload": [
@@ -79,11 +84,18 @@ def _patch_lifespan():
 
 @pytest.fixture(autouse=True)
 def _clear_board_cache():
-    from app.routers.kanban import _board_cache
+    from app.routers.kanban import (
+        _board_cache,
+        _contact_labels_cache,
+        _label_colors_cache,
+    )
 
-    _board_cache.clear()
+    caches = (_board_cache, _contact_labels_cache, _label_colors_cache)
+    for c in caches:
+        c.clear()
     yield
-    _board_cache.clear()
+    for c in caches:
+        c.clear()
 
 
 @pytest.fixture()
@@ -108,6 +120,8 @@ def mock_chatwoot_ok():
             return_value=MOCK_CONTACTS_FILTER_RESPONSE
         )
         mock_client.base_url = "https://test.chatwoot.com"
+        mock_client.list_labels = AsyncMock(return_value=MOCK_LABELS)
+        mock_client.get_contact_labels = AsyncMock(return_value=[])
         yield mock_client
 
 
@@ -133,6 +147,8 @@ def mock_chatwoot_empty():
             return_value={"payload": [], "meta": {"count": 0, "current_page": 1}}
         )
         mock_client.base_url = "https://test.chatwoot.com"
+        mock_client.list_labels = AsyncMock(return_value=MOCK_LABELS)
+        mock_client.get_contact_labels = AsyncMock(return_value=[])
         yield mock_client
 
 
@@ -146,6 +162,8 @@ def mock_chatwoot_error():
             side_effect=Exception("Connection refused")
         )
         mock_client.base_url = "https://test.chatwoot.com"
+        mock_client.list_labels = AsyncMock(return_value=MOCK_LABELS)
+        mock_client.get_contact_labels = AsyncMock(return_value=[])
         yield mock_client
 
 
@@ -186,4 +204,6 @@ def mock_chatwoot_flat_response():
             }
         )
         mock_client.base_url = "https://test.chatwoot.com"
+        mock_client.list_labels = AsyncMock(return_value=MOCK_LABELS)
+        mock_client.get_contact_labels = AsyncMock(return_value=[])
         yield mock_client

@@ -125,8 +125,8 @@ body {
 }
 
 .column {
-  flex: 0 0 280px;
-  max-width: 280px;
+  flex: 0 0 320px;
+  max-width: 320px;
   background: rgb(var(--bg-surface));
   border-radius: 8px;
   display: flex;
@@ -172,8 +172,8 @@ body {
   background: rgb(var(--bg-card));
   border: 1px solid rgb(var(--border));
   border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
   cursor: grab;
   transition: border-color 0.15s;
   position: relative;
@@ -194,7 +194,7 @@ body {
   margin-bottom: 4px;
 }
 .card-avatar {
-  width: 24px; height: 24px; border-radius: 50%;
+  width: 28px; height: 28px; border-radius: 50%;
   background: rgb(var(--border));
   flex-shrink: 0;
   overflow: hidden;
@@ -209,7 +209,7 @@ body {
   width: 100%; height: 100%; object-fit: cover;
 }
 .card-name {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: rgb(var(--text-primary));
   white-space: nowrap;
@@ -229,8 +229,50 @@ body {
 .card-time {
   font-size: 11px;
   color: rgb(var(--text-muted));
-  margin-top: 4px;
+  margin-top: 6px;
 }
+
+/* No card o nome pode ocupar até 2 linhas em vez de cortar com "…" */
+.card .card-name {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+/* Etiquetas do contato (mesmo jeito do Chatwoot: bolinha com a cor + nome) */
+.card-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 6px 0 2px;
+}
+.label-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+  color: rgb(var(--text-secondary));
+  background: rgb(var(--bg-surface));
+}
+.label-chip .label-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.label-chip .label-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal-labels { margin: -4px 0 12px; }
 
 .card-task {
   display: inline-flex;
@@ -373,6 +415,18 @@ body {
   margin-top: 2px;
 }
 .add-result button { flex-shrink: 0; padding: 4px 10px; font-size: 13px; }
+.add-all-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+.add-all-hint { font-size: 12px; color: rgb(var(--text-muted)); }
+.add-all-row .btn-secondary.confirm {
+  border-color: rgb(var(--accent));
+  color: rgb(var(--accent));
+}
 .add-empty { padding: 16px 4px; text-align: center; opacity: 0.6; font-size: 13px; }
 
 .modal-overlay {
@@ -691,6 +745,19 @@ function timeAgo(dateStr) {
   return `há ${days}d`;
 }
 
+function safeColor(c) {
+  return /^#[0-9a-fA-F]{3,8}$/.test(c || '') ? c : '#8a94a6';
+}
+
+function renderLabels(labels, extraClass = '') {
+  if (!labels || !labels.length) return '';
+  return `<div class="card-labels ${extraClass}">${labels.map(l => `
+    <span class="label-chip" title="${escapeHtml(l.title)}">
+      <span class="label-dot" style="background:${safeColor(l.color)}"></span>
+      <span class="label-text">${escapeHtml(l.title)}</span>
+    </span>`).join('')}</div>`;
+}
+
 function initials(name) {
   if (!name) return '?';
   return name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
@@ -748,8 +815,12 @@ async function loadConfig({ fresh = false } = {}) {
   return data;
 }
 
-async function loadBoard(stage) {
-  const url = stage ? `${API_BOARD}?stage=${encodeURIComponent(stage)}` : API_BOARD;
+async function loadBoard(stage, { fresh = false } = {}) {
+  const params = new URLSearchParams();
+  if (stage) params.set('stage', stage);
+  if (fresh) params.set('fresh', '1');
+  const qs = params.toString();
+  const url = qs ? `${API_BOARD}?${qs}` : API_BOARD;
   const res = await fetch(url);
   const data = await res.json();
   if (!res.ok) {
@@ -887,6 +958,7 @@ function openTaskModal(cardData) {
               <button type="button" class="link-remove" id="modal-remove-contact">Remover do kanban</button>
             </div>
           </div>
+          ${renderLabels(cardData.labels, 'modal-labels')}
           <div style="margin-bottom:12px">
             <span style="font-size:12px;font-weight:500;color:rgb(var(--text-secondary))">Tarefa: </span>${taskStatus}
           </div>
@@ -953,6 +1025,7 @@ let addSearchTimer = null;
 let addSearchSeq = 0;
 
 function openAddContactModal(defaultStage) {
+  addAllPending = null;
   const stages = allColumns.length
     ? allColumns
     : $$('.column').map(c => c.dataset.stage);
@@ -976,6 +1049,10 @@ function openAddContactModal(defaultStage) {
             <label>Buscar contato</label>
             <input type="search" id="add-search" class="add-search" placeholder="Nome, telefone ou e-mail" autocomplete="off">
           </div>
+          <div class="add-all-row">
+            <span class="add-all-hint" id="add-all-hint">Todos que ainda não estão no kanban</span>
+            <button type="button" class="btn-secondary" id="add-all-btn">Adicionar todos disponíveis</button>
+          </div>
           <div class="add-results" id="add-results"><div class="add-empty">Carregando…</div></div>
         </div>
       </div>
@@ -986,12 +1063,118 @@ function openAddContactModal(defaultStage) {
   });
   document.getElementById('modal-close-x').addEventListener('click', closeTaskModal);
   const input = document.getElementById('add-search');
+  document.getElementById('add-all-btn').addEventListener('click', addAllAvailable);
+  document.getElementById('add-stage').addEventListener('change', resetAddAll);
   input.addEventListener('input', () => {
+    resetAddAll();
     clearTimeout(addSearchTimer);
     addSearchTimer = setTimeout(() => runContactSearch(input.value), 300);
   });
   input.focus();
   runContactSearch('');
+}
+
+// ── Adicionar todos disponíveis ──
+// 1º clique conta quantos estão fora do kanban (respeitando a busca digitada);
+// 2º clique confirma e manda em lotes, mostrando o progresso no botão.
+const API_AVAILABLE = '/kanban/contacts/available';
+const API_BULK_STAGE = '/kanban/board/bulk-stage';
+const BULK_BATCH = 25;
+let addAllPending = null; // { ids, stage, q }
+let addAllRunning = false;
+
+function resetAddAll() {
+  if (addAllRunning) return;
+  addAllPending = null;
+  const btn = document.getElementById('add-all-btn');
+  const hint = document.getElementById('add-all-hint');
+  if (!btn) return;
+  btn.disabled = false;
+  btn.classList.remove('confirm');
+  btn.textContent = 'Adicionar todos disponíveis';
+  const q = document.getElementById('add-search')?.value.trim();
+  if (hint) hint.textContent = q
+    ? `Todos fora do kanban que batem com "${q}"`
+    : 'Todos que ainda não estão no kanban';
+}
+
+async function addAllAvailable() {
+  const btn = document.getElementById('add-all-btn');
+  const hint = document.getElementById('add-all-hint');
+  const stage = document.getElementById('add-stage')?.value;
+  const q = document.getElementById('add-search')?.value.trim() || '';
+  if (!stage) { showToast('Escolha uma etapa', 'error'); return; }
+  if (addAllRunning) return;
+
+  if (!addAllPending || addAllPending.stage !== stage || addAllPending.q !== q) {
+    btn.disabled = true;
+    btn.textContent = 'Contando…';
+    try {
+      const res = await fetch(`${API_AVAILABLE}?q=${encodeURIComponent(q)}`);
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+      const data = await res.json();
+      btn.disabled = false;
+      if (!data.count) {
+        btn.textContent = 'Adicionar todos disponíveis';
+        showToast(q ? 'Nenhum contato fora do kanban nessa busca' : 'Todos os contatos já estão no kanban', 'info');
+        return;
+      }
+      addAllPending = { ids: data.contact_ids, stage, q };
+      btn.classList.add('confirm');
+      btn.textContent = `Confirmar: ${data.count} em ${stage}`;
+      if (hint) hint.textContent = data.truncated
+        ? `${data.count} encontrados (a lista parou no limite; rode de novo depois)`
+        : `${data.count} contato${data.count > 1 ? 's' : ''} fora do kanban`;
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Adicionar todos disponíveis';
+      showToast(`Erro ao listar contatos: ${err.message}`, 'error');
+    }
+    return;
+  }
+
+  const { ids } = addAllPending;
+  addAllRunning = true;
+  btn.disabled = true;
+  btn.classList.remove('confirm');
+  const input = document.getElementById('add-search');
+  const select = document.getElementById('add-stage');
+  if (input) input.disabled = true;
+  if (select) select.disabled = true;
+  let added = 0;
+  let failed = 0;
+  try {
+    for (let i = 0; i < ids.length; i += BULK_BATCH) {
+      btn.textContent = `Adicionando ${Math.min(i, ids.length)}/${ids.length}…`;
+      const lote = ids.slice(i, i + BULK_BATCH);
+      try {
+        const res = await fetch(API_BULK_STAGE, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stage, contact_ids: lote }),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`);
+        const data = await res.json();
+        added += (data.added || []).length;
+        failed += (data.failed || []).length;
+      } catch (err) {
+        console.error('Lote falhou:', err);
+        failed += lote.length;
+      }
+    }
+  } finally {
+    addAllRunning = false;
+    if (input) input.disabled = false;
+    if (select) select.disabled = false;
+  }
+  if (failed) {
+    showToast(`${added} adicionado(s) a ${stage}; ${failed} ${failed === 1 ? 'falhou' : 'falharam'} (veja os logs)`, 'error');
+  } else {
+    showToast(`${added} contato(s) adicionado(s) a ${stage}`, 'success');
+  }
+  resetAddAll();
+  refreshBoard({ silent: true });
+  runContactSearch(q);
 }
 
 async function runContactSearch(q) {
@@ -1231,6 +1414,7 @@ function cardDataFromEl(el, contactId) {
     id: contactId,
     contact_name: el.querySelector('.card-name')?.textContent || '',
     thumbnail: el.querySelector('.card-avatar img')?.getAttribute('src') || '',
+    labels: JSON.parse(el.dataset.labels || '[]'),
     task: el.dataset.task ? JSON.parse(el.dataset.task) : null,
   };
 }
@@ -1389,7 +1573,7 @@ function renderBoard(data) {
   document.getElementById('state-filter').addEventListener('change', () => {
     refreshBoard();
   });
-  document.getElementById('refresh-btn').addEventListener('click', () => refreshBoard());
+  document.getElementById('refresh-btn').addEventListener('click', () => refreshBoard({ fresh: true }));
   document.getElementById('add-contact-btn').addEventListener('click', () => openAddContactModal());
   document.getElementById('order-stages-btn').addEventListener('click', openStageOrderModal);
 
@@ -1397,7 +1581,7 @@ function renderBoard(data) {
   renderColumns(columns, board);
 }
 
-async function refreshBoard({ silent = false } = {}) {
+async function refreshBoard({ silent = false, fresh = false } = {}) {
   const stage = document.getElementById('pipeline-select')?.value;
   const taskFilter = document.getElementById('state-filter')?.value;
   activeFilter = taskFilter;
@@ -1409,7 +1593,7 @@ async function refreshBoard({ silent = false } = {}) {
   }
 
   try {
-    const data = await loadBoard(stage || undefined);
+    const data = await loadBoard(stage || undefined, { fresh });
     lastGeneratedAt = data.generated_at || null;
     // Mantém a rolagem do quadro e de cada coluna ao redesenhar.
     const boardScroll = board.scrollLeft;
@@ -1476,12 +1660,14 @@ function createCard(card) {
   el.dataset.contactId = card.id;
   el.dataset.customAttributes = JSON.stringify(card.custom_attributes || {});
   if (card.task) el.dataset.task = JSON.stringify(card.task);
+  el.dataset.labels = JSON.stringify(card.labels || []);
 
   el.innerHTML = `
     <div class="card-contact">
       <div class="card-avatar">${card.thumbnail ? `<img src="${card.thumbnail}" alt="">` : initials(card.contact_name)}</div>
-      <div class="card-name">${card.contact_name}</div>
+      <div class="card-name">${escapeHtml(card.contact_name)}</div>
     </div>
+    ${renderLabels(card.labels)}
     ${card.task ? renderTaskBadge(card.task) : ''}
     <div class="card-time">${timeAgo(card.last_activity_at)}</div>
   `;
@@ -1501,6 +1687,7 @@ function createCard(card) {
       id: card.id,
       contact_name: card.contact_name,
       thumbnail: card.thumbnail,
+      labels: JSON.parse(el.dataset.labels || '[]'),
       task: el.dataset.task ? JSON.parse(el.dataset.task) : null,
     });
   });
@@ -1545,6 +1732,7 @@ function setupDropZone(body, targetStage) {
           thumbnail: draggable.querySelector('img')?.src || '',
           last_activity_at: new Date().toISOString(),
           custom_attributes: JSON.parse(draggable.dataset.customAttributes || '{}'),
+          labels: JSON.parse(draggable.dataset.labels || '[]'),
           task: draggable.dataset.task ? JSON.parse(draggable.dataset.task) : null,
         };
         targetBody.insertBefore(createCard(cardData), targetBody.firstChild);

@@ -475,3 +475,117 @@ def test_reorder_stages_forbidden_when_not_admin(client, mock_chatwoot_ok):
     )
     assert response.status_code == 403
     assert "administrador" in response.json()["detail"]
+
+
+# ── Etiquetas do contato ─────────────────────────────
+
+
+def test_board_includes_contact_labels_with_colors(client, mock_chatwoot_ok):
+    async def labels(contact_id):
+        return {101: ["vip", "sem-cor"], 102: []}[contact_id]
+
+    mock_chatwoot_ok.get_contact_labels = AsyncMock(side_effect=labels)
+    cards = client.get("/kanban/board?stage=Potencial").json()["columns"][0]["contacts"]
+    por_id = {c["id"]: c["labels"] for c in cards}
+    assert por_id[101] == [
+        {"title": "vip", "color": "#ff0000"},
+        {"title": "sem-cor", "color": "#8a94a6"},
+    ]
+    assert por_id[102] == []
+
+
+def test_board_labels_cached_until_fresh(client, mock_chatwoot_ok):
+    mock_chatwoot_ok.get_contact_labels = AsyncMock(return_value=["vip"])
+    client.get("/kanban/board?stage=Potencial")
+    from app.routers.kanban import _board_cache
+
+    _board_cache.clear()  # simula o fim do cache curto do quadro
+    client.get("/kanban/board?stage=Potencial")
+    assert mock_chatwoot_ok.get_contact_labels.await_count == 2  # 2 contatos, 1 vez
+
+    client.get("/kanban/board?stage=Potencial&fresh=1")
+    assert mock_chatwoot_ok.get_contact_labels.await_count == 4
+
+
+def test_board_survives_label_errors(client, mock_chatwoot_ok):
+    mock_chatwoot_ok.get_contact_labels = AsyncMock(side_effect=RuntimeError("x"))
+    mock_chatwoot_ok.list_labels = AsyncMock(side_effect=RuntimeError("y"))
+    response = client.get("/kanban/board?stage=Potencial")
+    assert response.status_code == 200
+    assert all(c["labels"] == [] for c in response.json()["columns"][0]["contacts"])
+
+
+# ── Adicionar todos disponíveis ──────────────────────
+
+
+def _pagina(*contatos):
+    return [
+        {"id": cid, "custom_attributes": {"pipeline_01_etapas": st} if st else {}}
+        for cid, st in contatos
+    ]
+
+
+def test_available_contacts_walks_all_pages(client, mock_chatwoot_ok):
+    paginas = {
+        1: _pagina((1, None), (2, "Potencial"), (3, None)),
+        2: _pagina((4, None), (5, "Cerrado")),
+        3: [],
+    }
+
+    async def listar(page=1):
+        return paginas[page]
+
+    mock_chatwoot_ok.list_recent_contacts = AsyncMock(side_effect=listar)
+    data = client.get("/kanban/contacts/available").json()
+    assert data == {"contact_ids": [1, 3, 4], "count": 3, "truncated": False}
+
+
+def test_available_contacts_uses_search_and_stops_on_repeat(client, mock_chatwoot_ok):
+    mock_chatwoot_ok.search_contacts = AsyncMock(return_value=_pagina((7, None)))
+    data = client.get("/kanban/contacts/available?q=ana").json()
+    assert data["contact_ids"] == [7]
+    assert mock_chatwoot_ok.search_contacts.await_count == 2  # 2ª página repetiu
+    mock_chatwoot_ok.search_contacts.assert_any_await("ana", page=1)
+
+
+_AGENTE = {"id": 1, "nombre": "Bot", "email": "bot@x"}
+
+
+@patch("app.routers.kanban.get_or_create_agent", new_callable=AsyncMock)
+@patch("app.routers.kanban.write_audit_log", new_callable=AsyncMock)
+def test_bulk_stage_adds_and_reports_failures(_audit, agent, client, mock_chatwoot_ok):
+    agent.return_value = _AGENTE
+
+    async def atualizar(contact_id, attrs, skip_read=False):
+        if contact_id == 2:
+            raise RuntimeError("boom")
+        return {}
+
+    mock_chatwoot_ok.safe_update_contact_custom_attributes = AsyncMock(
+        side_effect=atualizar
+    )
+    response = client.post(
+        "/kanban/board/bulk-stage",
+        json={"stage": "Potencial", "contact_ids": [1, 2, 3, 3]},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert sorted(data["added"]) == [1, 3]
+    assert data["failed"] == [{"id": 2, "error": "boom"}]
+    assert mock_chatwoot_ok.safe_update_contact_custom_attributes.await_count == 3
+
+
+@patch("app.routers.kanban.get_or_create_agent", new_callable=AsyncMock)
+def test_bulk_stage_rejects_invalid_stage_and_big_batch(
+    agent, client, mock_chatwoot_ok
+):
+    agent.return_value = _AGENTE
+    r = client.post(
+        "/kanban/board/bulk-stage", json={"stage": "Nope", "contact_ids": [1]}
+    )
+    assert r.status_code == 400
+    r = client.post(
+        "/kanban/board/bulk-stage",
+        json={"stage": "Potencial", "contact_ids": list(range(51))},
+    )
+    assert r.status_code == 400

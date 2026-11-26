@@ -40,6 +40,16 @@ _board_cache: dict[str, tuple[float, dict]] = {}
 _BOARD_CACHE_TTL = 8
 _PAGE_SIZE = 50
 
+# Etiquetas: o Chatwoot não manda as etiquetas na lista de contatos, então cada
+# contato custa uma chamada. O cache segura isso entre os polls do quadro; o botão
+# "Atualizar" pede ?fresh=1 e busca tudo de novo.
+_contact_labels_cache: dict[str, tuple[float, list[str]]] = {}
+_CONTACT_LABELS_TTL = 120
+_label_colors_cache: dict[str, tuple[float, dict[str, str]]] = {}
+_LABEL_COLORS_TTL = 300
+_LABELS_CONCURRENCY = 8
+_DEFAULT_LABEL_COLOR = "#8a94a6"
+
 router = APIRouter(prefix="/kanban", tags=["kanban"])
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
@@ -100,6 +110,67 @@ def _invalidate_board_cache() -> None:
     prefixo = f"{account_id_atual()}:"
     for chave in [c for c in _board_cache if c.startswith(prefixo)]:
         _board_cache.pop(chave, None)
+
+
+def _clear_labels_cache() -> None:
+    prefixo = f"{account_id_atual()}:"
+    for chave in [c for c in _contact_labels_cache if c.startswith(prefixo)]:
+        _contact_labels_cache.pop(chave, None)
+    _label_colors_cache.pop(str(account_id_atual()), None)
+
+
+async def _label_colors() -> dict[str, str]:
+    chave = str(account_id_atual())
+    entry = _label_colors_cache.get(chave)
+    if entry and (time_module.time() - entry[0]) < _LABEL_COLORS_TTL:
+        return entry[1]
+    try:
+        labels = await chatwoot_client.list_labels()
+    except Exception as exc:  # sem cores o quadro ainda funciona
+        logger.warning("Failed to list labels: %s", exc)
+        return entry[1] if entry else {}
+    cores = {
+        str(lbl.get("title")): lbl.get("color") or _DEFAULT_LABEL_COLOR
+        for lbl in labels or []
+        if isinstance(lbl, dict) and lbl.get("title")
+    }
+    _label_colors_cache[chave] = (time_module.time(), cores)
+    return cores
+
+
+async def _attach_labels(cards: list[dict]) -> None:
+    """Põe em cada card a lista de etiquetas do contato, com cor."""
+    if not cards:
+        return
+    cores = await _label_colors()
+    agora = time_module.time()
+    conta = account_id_atual()
+    sem = asyncio.Semaphore(_LABELS_CONCURRENCY)
+
+    async def _labels_do(contact_id: int) -> list[str]:
+        chave = f"{conta}:{contact_id}"
+        entry = _contact_labels_cache.get(chave)
+        if entry and (agora - entry[0]) < _CONTACT_LABELS_TTL:
+            return entry[1]
+        async with sem:
+            try:
+                labels = await chatwoot_client.get_contact_labels(contact_id)
+            except Exception as exc:  # uma falha não pode derrubar o quadro
+                logger.warning(
+                    "Failed to get labels for contact %s: %s", contact_id, exc
+                )
+                return entry[1] if entry else []
+        _contact_labels_cache[chave] = (time_module.time(), labels)
+        return labels
+
+    ids = [c["id"] for c in cards if c.get("id")]
+    resultados = await asyncio.gather(*(_labels_do(i) for i in ids))
+    por_id = dict(zip(ids, resultados, strict=True))
+    for card in cards:
+        card["labels"] = [
+            {"title": t, "color": cores.get(t, _DEFAULT_LABEL_COLOR)}
+            for t in por_id.get(card.get("id"), [])
+        ]
 
 
 async def _bg_sync_task_and_audit(
@@ -562,6 +633,112 @@ async def search_contacts(q: str = ""):
     return {"contacts": results}
 
 
+# "Adicionar todos disponíveis": a lista sai paginada do Chatwoot e o navegador
+# manda os contatos em lotes, para não estourar o tempo de uma requisição só.
+_BULK_MAX_PAGES = 500
+_BULK_BATCH_MAX = 50
+_BULK_CONCURRENCY = 5
+
+
+class BulkStageRequest(BaseModel):
+    stage: str
+    contact_ids: list[int]
+
+
+@router.get("/contacts/available")
+async def available_contacts(q: str = ""):
+    """Ids de todos os contatos fora do kanban (com a busca, só os que batem nela)."""
+    query = q.strip()
+    ids: list[int] = []
+    vistos: set[int] = set()
+    page = 1
+    truncated = False
+    try:
+        while True:
+            if query:
+                raw = await chatwoot_client.search_contacts(query, page=page)
+            else:
+                raw = await chatwoot_client.list_recent_contacts(page=page)
+            if not raw:
+                break
+            novos = 0
+            for contact in raw:
+                cid = contact.get("id")
+                if not cid or cid in vistos:
+                    continue
+                vistos.add(cid)
+                novos += 1
+                attrs = contact.get("custom_attributes") or {}
+                if not attrs.get(PIPELINE_ATTR_KEY):
+                    ids.append(cid)
+            if not novos:  # página repetida: o Chatwoot já não tem mais nada
+                break
+            page += 1
+            if page > _BULK_MAX_PAGES:
+                truncated = True
+                break
+    except Exception as exc:
+        logger.error("Failed to list available contacts (q=%r): %s", query, exc)
+        raise HTTPException(
+            status_code=502, detail=f"Erro na API do Chatwoot: {exc}"
+        ) from exc
+    return {"contact_ids": ids, "count": len(ids), "truncated": truncated}
+
+
+@router.post("/board/bulk-stage")
+async def bulk_stage(body: BulkStageRequest, request: Request):
+    """Põe um lote de contatos numa etapa. Devolve quais entraram e quais falharam."""
+    if len(body.contact_ids) > _BULK_BATCH_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No máximo {_BULK_BATCH_MAX} contatos por lote.",
+        )
+    actor_id, actor_name, _ = await _get_actor(request)
+
+    definitions = await chatwoot_client.get_custom_attribute_definitions()
+    pipeline_attr = _find_pipeline_attribute(definitions)
+    valid_stages = pipeline_attr.get("attribute_values", []) if pipeline_attr else []
+    if valid_stages and body.stage not in valid_stages:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Etapa inválida '{body.stage}'. Válidas: {valid_stages}",
+        )
+
+    sem = asyncio.Semaphore(_BULK_CONCURRENCY)
+    added: list[int] = []
+    failed: list[dict] = []
+
+    async def _um(contact_id: int) -> None:
+        async with sem:
+            try:
+                await chatwoot_client.safe_update_contact_custom_attributes(
+                    contact_id, {PIPELINE_ATTR_KEY: body.stage}, skip_read=True
+                )
+                ok = True
+                added.append(contact_id)
+            except Exception as exc:  # um contato com erro não para o lote
+                logger.error("Bulk add failed for contact %s: %s", contact_id, exc)
+                ok = False
+                failed.append({"id": contact_id, "error": str(exc)})
+        try:
+            await write_audit_log(
+                contact_id=contact_id,
+                actor_agent_id=actor_id,
+                actor_name=actor_name,
+                action="stage_change",
+                previous_state=None,
+                new_state={"stage_to": body.stage, "bulk": True},
+                chatwoot_call_ok=ok,
+            )
+        except Exception as exc:  # o log de auditoria não pode quebrar o lote
+            logger.warning("Audit log failed for bulk add %s: %s", contact_id, exc)
+
+    await asyncio.gather(*(_um(cid) for cid in dict.fromkeys(body.contact_ids)))
+    if added:
+        _invalidate_board_cache()
+    return {"added": added, "failed": failed}
+
+
 @router.get("/config")
 async def kanban_config(fresh: bool = False):
     if fresh:  # a tela de ordenar etapas precisa da lista atual, não da do cache
@@ -592,7 +769,10 @@ async def kanban_config(fresh: bool = False):
 
 
 @router.get("/board")
-async def kanban_board(stage: str | None = None):
+async def kanban_board(stage: str | None = None, fresh: bool = False):
+    if fresh:  # botão "Atualizar": ignora os caches (etiquetas inclusive)
+        _invalidate_board_cache()
+        _clear_labels_cache()
     cached = _get_cached_board(stage)
     if cached is not None:
         return cached
@@ -653,6 +833,8 @@ async def kanban_board(stage: str | None = None):
                 if c.get("id")
             ]
             await batch_sync_tasks_from_chatwoot(contacts_data)
+
+            await _attach_labels(all_cards)
 
             contact_ids = [c["id"] for c in all_cards if c.get("id")]
             tasks_map = await get_tasks_for_contacts(contact_ids)

@@ -130,6 +130,21 @@ class ChatwootClient:
         data = resp.json()
         return data.get("payload", []) if isinstance(data, dict) else data
 
+    async def get_contact_labels(self, contact_id: int) -> list[str]:
+        """Etiquetas do contato (as do contato, não as das conversas)."""
+        url = f"{self._account_path}/contacts/{contact_id}/labels"
+        resp = await self._request("GET", url)
+        data = resp.json()
+        labels = data.get("payload", []) if isinstance(data, dict) else data
+        return [str(lbl) for lbl in labels or []]
+
+    async def list_labels(self) -> list[dict]:
+        """Etiquetas da conta, com a cor de cada uma."""
+        url = f"{self._account_path}/labels"
+        resp = await self._request("GET", url)
+        data = resp.json()
+        return data.get("payload", []) if isinstance(data, dict) else data
+
     async def get_contact(self, contact_id: int) -> dict:
         url = f"{self._account_path}/contacts/{contact_id}"
         resp = await self._request("GET", url)
